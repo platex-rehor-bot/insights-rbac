@@ -36,12 +36,14 @@ class AuditLog(TenantAwareModel):
     ROLE_V2 = "role_v2"
     USER = "user"
     PERMISSION = "permission"
+    ROLE_BINDING = "role_binding"
     RESOURCE_CHOICES = (
         (GROUP, "Group"),
         (ROLE, "Role"),
         (ROLE_V2, "V2 Role"),
         (USER, "User"),
         (PERMISSION, "Permission"),
+        (ROLE_BINDING, "Role Binding"),
     )
 
     DELETE = "delete"
@@ -89,6 +91,9 @@ class AuditLog(TenantAwareModel):
     def _format_resource_type(resource_type: str) -> str:
         if resource_type == AuditLog.ROLE_V2:
             return "V2 role"
+
+        if resource_type == AuditLog.ROLE_BINDING:
+            return "role binding"
 
         return resource_type
 
@@ -150,6 +155,16 @@ class AuditLog(TenantAwareModel):
             if request.data.get("access"):
                 description = description + "edited access (permissions/resources)"
         return description
+
+    def log_v2(self, request, resource_type, action, resource_uuid, description):
+        """Audit Log for v2 resources that use UUID as primary key."""
+        self.principal_username = request.user.username
+        self.resource_type = resource_type
+        self.resource_uuid = resource_uuid
+        self.description = description[:255]
+        self.action = action
+        self.tenant_id = self.get_tenant_id(request)
+        super(AuditLog, self).save()
 
     def log_create(self, request, resource):
         """Audit Log when a role or a group is created."""
