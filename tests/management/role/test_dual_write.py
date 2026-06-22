@@ -3016,6 +3016,38 @@ class DualWriteCrossAccountReqeustTestCase(DualWriteTestCase):
             for_principals=[self.user_id],
         )
 
+    @override_settings(
+        ROOT_SCOPE_PERMISSIONS="",
+        TENANT_SCOPE_PERMISSIONS="subscriptions:organization:read",
+    )
+    def _do_test_mixed_scope_car_creates_bindings_at_both_scopes(self):
+        """A CAR with a mixed TENANT + DEFAULT role creates bindings at both scopes."""
+        system_role = self.given_v1_system_role(
+            "mixed_car",
+            permissions=["subscriptions:organization:read", "inventory:hosts:read"],
+        )
+
+        car = self.given_car(self.user_id, [system_role])
+
+        # Should have bindings at BOTH tenant and default workspace scopes
+        self._expect_user_tenant_count(1, system_role)
+        self._expect_user_default_count(1, system_role)
+        self._expect_user_root_count(0, system_role)
+
+        # Expire the CAR and verify both bindings are removed
+        self.given_car_expired(car)
+
+        self._expect_user_tenant_count(0, system_role)
+        self._expect_user_default_count(0, system_role)
+        self._expect_user_root_count(0, system_role)
+
+    def test_mixed_scope_car_creates_bindings_at_both_scopes(self):
+        self._do_test_mixed_scope_car_creates_bindings_at_both_scopes()
+
+    def test_v2_mixed_scope_car_creates_bindings_at_both_scopes(self):
+        ensure_v2_write_activated(self.tenant)
+        self._do_test_mixed_scope_car_creates_bindings_at_both_scopes()
+
 
 class RbacFixture:
     """RBAC Fixture."""
