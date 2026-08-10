@@ -3801,7 +3801,9 @@ class BatchCreateViewTests(IdentityRequest):
             ]
         }
         response = self.client.post(url, payload, format="json", **self.headers)
-        self._assert_problem_details(response, 400, '"serviceaccount" is not a valid choice.', "requests.0.subject.type")
+        self._assert_problem_details(
+            response, 400, '"serviceaccount" is not a valid choice.', "requests.0.subject.type"
+        )
 
     @patch(
         "management.permissions.role_binding_access.RoleBindingKesselAccessPermission.has_permission",
