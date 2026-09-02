@@ -41,6 +41,7 @@ from management.group.definer import (
 from management.group.relation_api_dual_write_group_handler import (
     RelationApiDualWriteGroupHandler,
 )
+from management.group.service import sync_new_principals_to_tenant_mapping
 from management.group.serializer import (
     GroupInputSerializer,
     GroupPrincipalInputSerializer,
@@ -58,19 +59,17 @@ from management.permissions import GroupAccessPermission
 from management.permissions.v2_edit_api_access import is_v2_edit_enabled_for_request
 from management.principal.it_service import ITService
 from management.principal.model import Principal
-from management.principal.proxy import PrincipalProxy, external_principal_to_user
+from management.principal.proxy import PrincipalProxy
 from management.principal.serializer import ServiceAccountSerializer
 from management.principal.view import ADMIN_ONLY_KEY, USERNAME_ONLY_KEY, VALID_BOOLEAN_VALUE
 from management.querysets import (
     get_group_queryset,
     get_role_queryset,
 )
-from management.relation_replicator.outbox_replicator import OutboxReplicator
 from management.relation_replicator.relation_replicator import ReplicationEventType
 from management.role.view import RoleViewSet
 from management.role_binding.service import RoleBindingService
 from management.tenant_mapping.v2_activation import V1WriteBlockedError, assert_v1_write_allowed
-from management.tenant_service import get_tenant_bootstrap_service
 from management.utils import validate_and_get_key, validate_group_name, validate_uuid
 from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import action
@@ -972,22 +971,8 @@ class GroupViewSet(
 
             # Sync newly introduced principals to TenantMapping default/admin groups in SpiceDB.
             # Only for principals that were just created or had user_id populated for the first time.
-            # Best-effort: failures must not break the group-add operation.
-            if principals_needing_v2_sync:
-                try:
-                    bootstrap_service = get_tenant_bootstrap_service(OutboxReplicator())
-                    for bop_item in principals_needing_v2_sync:
-                        user_obj = external_principal_to_user(bop_item)
-                        if not user_obj.org_id:
-                            user_obj.org_id = org_id
-                        if user_obj.user_id and user_obj.is_active:
-                            bootstrap_service.update_user(user_obj, upsert=True)
-                except Exception:
-                    logger.warning(
-                        "Failed to sync TenantMapping membership for new principals in org %s",
-                        org_id,
-                        exc_info=True,
-                    )
+            # Best-effort: failures are logged per-principal and do not break the group-add operation.
+            sync_new_principals_to_tenant_mapping(principals_needing_v2_sync, org_id)
         # Serialize the group...
         output = GroupSerializer(group)
         response = Response(status=status.HTTP_200_OK, data=output.data)
