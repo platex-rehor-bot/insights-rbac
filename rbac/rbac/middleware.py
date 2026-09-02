@@ -212,6 +212,32 @@ class IdentityHeaderMiddleware:
                     needs_update = True
                 if needs_update:
                     tenant.save(update_fields=["ready", "account_id"])
+
+                # Sync new principals to TenantMapping default/admin groups on first identity encounter.
+                # Only fires when: (a) not a system/service-account request, (b) Principal doesn't exist
+                # or exists without user_id (lazy principal). Avoids calling update_user on every request.
+                if (
+                    not request.user.system
+                    and not getattr(request.user, "is_service_account", False)
+                    and request.user.username
+                ):
+                    try:
+                        principal = Principal.objects.get(username__iexact=request.user.username, tenant=tenant)
+                        needs_v2_sync = principal.user_id is None and request.user.user_id
+                    except Principal.DoesNotExist:
+                        needs_v2_sync = True
+
+                    if needs_v2_sync:
+                        try:
+                            with transaction.atomic():
+                                self.bootstrap_service.update_user(request.user, upsert=True)
+                        except Exception:
+                            logger.warning(
+                                "Failed to sync TenantMapping membership for user %s in org %s",
+                                request.user.username,
+                                request.user.org_id,
+                                exc_info=True,
+                            )
             except Tenant.DoesNotExist:
                 if request.user.system:
                     raise Http404()

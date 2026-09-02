@@ -58,17 +58,19 @@ from management.permissions import GroupAccessPermission
 from management.permissions.v2_edit_api_access import is_v2_edit_enabled_for_request
 from management.principal.it_service import ITService
 from management.principal.model import Principal
-from management.principal.proxy import PrincipalProxy
+from management.principal.proxy import PrincipalProxy, external_principal_to_user
 from management.principal.serializer import ServiceAccountSerializer
 from management.principal.view import ADMIN_ONLY_KEY, USERNAME_ONLY_KEY, VALID_BOOLEAN_VALUE
 from management.querysets import (
     get_group_queryset,
     get_role_queryset,
 )
+from management.relation_replicator.outbox_replicator import OutboxReplicator
 from management.relation_replicator.relation_replicator import ReplicationEventType
 from management.role.view import RoleViewSet
 from management.role_binding.service import RoleBindingService
 from management.tenant_mapping.v2_activation import V1WriteBlockedError, assert_v1_write_allowed
+from management.tenant_service import get_tenant_bootstrap_service
 from management.utils import validate_and_get_key, validate_group_name, validate_uuid
 from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import action
@@ -580,12 +582,22 @@ class GroupViewSet(
         return resp
 
     def add_users(self, group, principals_from_response, org_id=None):
-        """Add principals to the group."""
+        """Add principals to the group.
+
+        Returns:
+            tuple: (group, new_principals, principals_needing_v2_sync)
+                - new_principals: all Principal objects added to the group
+                - principals_needing_v2_sync: BOP response items for principals that were
+                  newly created or had user_id populated for the first time (lazy principals),
+                  which need TenantMapping group membership sync via update_user()
+        """
         tenant = self.request.tenant
         new_principals = []
+        principals_needing_v2_sync = []
         for item in principals_from_response:
             # cross-account request principals won't be in the resp from BOP since they don't exist
             username = item["username"]
+            needs_sync = False
             try:
                 principal = Principal.objects.get(username__iexact=username, tenant=tenant)
                 if principal.user_id is None and "user_id" in item:
@@ -593,13 +605,17 @@ class GroupViewSet(
                     user_id = item["user_id"]
                     principal.user_id = user_id
                     principal.save()
+                    needs_sync = True
             except Principal.DoesNotExist:
                 principal = Principal.objects.create(username=username, tenant=tenant, user_id=item["user_id"])
                 logger.info("Created new principal %s for org_id %s.", username, org_id)
+                needs_sync = True
             group.principals.add(principal)
             new_principals.append(principal)
+            if needs_sync:
+                principals_needing_v2_sync.append(item)
             group_principal_change_notification_handler(self.request.user, group, username, "added")
-        return group, new_principals
+        return group, new_principals, principals_needing_v2_sync
 
     def ensure_id_for_service_accounts_exists(
         self,
@@ -936,8 +952,11 @@ class GroupViewSet(
                         Principal.Types.SERVICE_ACCOUNT,
                     )
             new_users = []
+            principals_needing_v2_sync = []
             if len(principals) > 0:
-                group, new_users = self.add_users(group, principals_from_response, org_id=org_id)
+                group, new_users, principals_needing_v2_sync = self.add_users(
+                    group, principals_from_response, org_id=org_id
+                )
                 for user in new_users:
                     auditlog = AuditLog()
                     auditlog.log_group_assignment(
@@ -950,6 +969,25 @@ class GroupViewSet(
 
             dual_write_handler = RelationApiDualWriteGroupHandler(group, ReplicationEventType.ADD_PRINCIPALS_TO_GROUP)
             dual_write_handler.replicate_new_principals(new_users + new_service_accounts)
+
+            # Sync newly introduced principals to TenantMapping default/admin groups in SpiceDB.
+            # Only for principals that were just created or had user_id populated for the first time.
+            # Best-effort: failures must not break the group-add operation.
+            if principals_needing_v2_sync:
+                try:
+                    bootstrap_service = get_tenant_bootstrap_service(OutboxReplicator())
+                    for bop_item in principals_needing_v2_sync:
+                        user_obj = external_principal_to_user(bop_item)
+                        if not user_obj.org_id:
+                            user_obj.org_id = org_id
+                        if user_obj.user_id and user_obj.is_active:
+                            bootstrap_service.update_user(user_obj, upsert=True)
+                except Exception:
+                    logger.warning(
+                        "Failed to sync TenantMapping membership for new principals in org %s",
+                        org_id,
+                        exc_info=True,
+                    )
         # Serialize the group...
         output = GroupSerializer(group)
         response = Response(status=status.HTTP_200_OK, data=output.data)
