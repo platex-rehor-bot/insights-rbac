@@ -26,7 +26,7 @@
       "get": {
         "operationId": "Groups_list",
         "summary": "List groups",
-        "description": "List groups",
+        "description": "List groups. Supports filtering by name, role membership, principal membership, and group flags. Use scope=principal to return only groups the calling user belongs to.",
         "parameters": [
           {
             "name": "name",
@@ -58,6 +58,66 @@
             "description": "Filter groups that contain this username as a member",
             "schema": {
               "type": "string"
+            },
+            "explode": false
+          },
+          {
+            "name": "exclude_username",
+            "in": "query",
+            "required": false,
+            "description": "Exclude groups that contain this username. Mutually exclusive with username.",
+            "schema": {
+              "type": "string"
+            },
+            "explode": false
+          },
+          {
+            "name": "role_names",
+            "in": "query",
+            "required": false,
+            "description": "Filter groups by comma-separated role names. Use role_discriminator to control match logic.",
+            "schema": {
+              "type": "string"
+            },
+            "explode": false
+          },
+          {
+            "name": "role_discriminator",
+            "in": "query",
+            "required": false,
+            "description": "Controls how role_names are matched: 'any' returns groups with at least one matching role; 'all' requires every role. Only used with role_names.",
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/RoleDiscriminator"
+                }
+              ],
+              "default": "any"
+            },
+            "explode": false
+          },
+          {
+            "name": "principals",
+            "in": "query",
+            "required": false,
+            "description": "Filter groups by comma-separated principal usernames. Returns groups that contain ALL specified principals.",
+            "schema": {
+              "type": "string"
+            },
+            "explode": false
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "description": "Scope filter: 'org_id' (default) returns all groups in the organization; 'principal' returns only groups the calling user belongs to.",
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/GroupScope"
+                }
+              ],
+              "default": "org_id"
             },
             "explode": false
           },
@@ -95,7 +155,7 @@
             "name": "order_by",
             "in": "query",
             "required": false,
-            "description": "Order by field (prefix - for descending). Allowed: name, modified, principal_count",
+            "description": "Order by field (prefix - for descending). Allowed: name, modified, principal_count, role_count",
             "schema": {
               "type": "string",
               "default": "name"
@@ -270,7 +330,7 @@
       "get": {
         "operationId": "Groups_retrieve",
         "summary": "Retrieve a group",
-        "description": "Retrieve a group by UUID",
+        "description": "Retrieve a group by UUID. Unlike V1, V2 does not embed principals or roles in the group response. Use GET /groups/{uuid}/principals/ for membership and GET /role-bindings/by-subject/?subject_type=group&subject_id={uuid} for role assignments. This is an intentional contract change to reduce payload size and support pagination on related resources.",
         "parameters": [
           {
             "name": "uuid",
@@ -350,7 +410,7 @@
       "put": {
         "operationId": "Groups_update",
         "summary": "Update a group",
-        "description": "Update a group (system groups cannot be modified)",
+        "description": "Update a group. Protected-group behavior: system groups (system=true) return 400; platform_default and admin_default groups allow name/description updates but not membership changes through this endpoint.",
         "parameters": [
           {
             "name": "uuid",
@@ -440,7 +500,7 @@
       "delete": {
         "operationId": "Groups_destroy",
         "summary": "Delete a group",
-        "description": "Delete a group (system groups and groups with active role bindings cannot be deleted)",
+        "description": "Delete a group. Protected-group behavior: system groups (system=true) return 400; platform_default groups return 400; admin_default groups return 400. Groups with active role bindings return 409 Conflict. Only custom (non-protected) groups with no active role bindings can be deleted.",
         "parameters": [
           {
             "name": "uuid",
@@ -525,7 +585,7 @@
       "get": {
         "operationId": "Groups_listPrincipals",
         "summary": "List group principals",
-        "description": "List principals who are members of this group",
+        "description": "List principals who are members of this group. When principal_type is 'all' or omitted, the response contains a unified Principal[] with the type field distinguishing users from service accounts.",
         "parameters": [
           {
             "name": "uuid",
@@ -539,9 +599,14 @@
             "name": "principal_type",
             "in": "query",
             "required": false,
-            "description": "Filter by principal type: user or service-account",
+            "description": "Filter by principal type: 'user' (default), 'service-account', or 'all'. When 'all', returns both users and service accounts in a unified list.",
             "schema": {
-              "$ref": "#/components/schemas/PrincipalType"
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/PrincipalTypeFilter"
+                }
+              ],
+              "default": "user"
             },
             "explode": false
           },
@@ -549,7 +614,69 @@
             "name": "username",
             "in": "query",
             "required": false,
-            "description": "Filter by username (substring match)",
+            "description": "Filter by username (substring match). Applies to user principals.",
+            "schema": {
+              "type": "string"
+            },
+            "explode": false
+          },
+          {
+            "name": "principal_username",
+            "in": "query",
+            "required": false,
+            "description": "Filter by principal username (case-insensitive substring match). Applies to both user and service-account principals.",
+            "schema": {
+              "type": "string"
+            },
+            "explode": false
+          },
+          {
+            "name": "username_only",
+            "in": "query",
+            "required": false,
+            "description": "When true, return only usernames without enrichment from external identity services. Applies to user principals only.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "explode": false
+          },
+          {
+            "name": "admin_only",
+            "in": "query",
+            "required": false,
+            "description": "When true, return only org admin users. Applies to user principals only.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "explode": false
+          },
+          {
+            "name": "service_account_name",
+            "in": "query",
+            "required": false,
+            "description": "Filter service accounts by display name (substring match). Only used when principal_type is 'service-account' or 'all'.",
+            "schema": {
+              "type": "string"
+            },
+            "explode": false
+          },
+          {
+            "name": "service_account_description",
+            "in": "query",
+            "required": false,
+            "description": "Filter service accounts by description (substring match). Only used when principal_type is 'service-account' or 'all'.",
+            "schema": {
+              "type": "string"
+            },
+            "explode": false
+          },
+          {
+            "name": "service_account_client_ids",
+            "in": "query",
+            "required": false,
+            "description": "Check membership of specific service account client IDs (comma-separated). Incompatible with other filter parameters. Returns only the matching service accounts that are members of this group.",
             "schema": {
               "type": "string"
             },
@@ -663,7 +790,7 @@
       "post": {
         "operationId": "Groups_addPrincipals",
         "summary": "Add principals to a group",
-        "description": "Add principals to a group (system groups cannot be modified)",
+        "description": "Add principals to a group. At least one of usernames or service_accounts must contain items. Protected-group behavior: system groups return 400; platform_default and admin_default groups allow adding members.",
         "parameters": [
           {
             "name": "uuid",
@@ -749,13 +876,106 @@
             }
           }
         }
+      },
+      "delete": {
+        "operationId": "Groups_removePrincipals",
+        "summary": "Remove principals from a group in bulk",
+        "description": "Remove principals from a group in bulk. At least one of usernames or service_accounts must be provided. All specified principals must be members of the group; if any are not found, the request returns 404 and no removals are performed. Protected-group behavior: system groups return 400.",
+        "parameters": [
+          {
+            "name": "uuid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/UUID"
+            }
+          },
+          {
+            "name": "usernames",
+            "in": "query",
+            "required": false,
+            "description": "Comma-separated usernames to remove from the group",
+            "schema": {
+              "type": "string"
+            },
+            "explode": false
+          },
+          {
+            "name": "service-accounts",
+            "in": "query",
+            "required": false,
+            "description": "Comma-separated service account client IDs to remove from the group",
+            "schema": {
+              "type": "string"
+            },
+            "explode": false
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "There is no content to send for this request, but the headers may be useful."
+          },
+          "400": {
+            "description": "The server could not understand the request due to invalid syntax.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problems.Problem400"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Access is unauthorized.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problems.Problem401"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access is forbidden.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problems.Problem403"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The server cannot find the requested resource.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problems.Problem404"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problems.Problem500"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Groups"
+        ]
       }
     },
     "/groups/{uuid}/principals/{principal_uuid}/": {
       "delete": {
         "operationId": "Groups_removePrincipal",
         "summary": "Remove a principal from a group",
-        "description": "Remove a principal from a group (system groups cannot be modified)",
+        "description": "Remove a single principal from a group by principal UUID. Protected-group behavior: system groups return 400. For bulk removal, use DELETE /groups/{uuid}/principals/ with query parameters.",
         "parameters": [
           {
             "name": "uuid",
@@ -1350,7 +1570,7 @@
       "get": {
         "operationId": "RoleBindings_listBySubject",
         "summary": "List role bindings grouped by subject",
-        "description": "List role bindings grouped by subject. subject_type (optional) is user or group only, with subject_id as UUID. granted_subject_type, granted_subject_id, and granted_subject.principal.user_id are not query parameters on this path—use GET /role-bindings/ for those filters.",
+        "description": "List role bindings grouped by subject. subject_type (optional) is user or group only, with subject_id as UUID. granted_subject_type, granted_subject_id, and granted_subject.principal.user_id are not query parameters on this path\u2014use GET /role-bindings/ for those filters.",
         "parameters": [
           {
             "name": "limit",
@@ -3670,6 +3890,14 @@
         "type": "string",
         "description": "Field mask used by the `fields` query parameter to control which fields\nare included in the response.\n\n**Syntax:**\n- Use comma to separate multiple fields: `id,name,description`\n- Use parentheses for nested objects: `subject(id,name),resource(type)`\n\n**Examples:**\n- `id,name`\n- `subject(group.name),role(name)`"
       },
+      "GroupScope": {
+        "type": "string",
+        "enum": [
+          "org_id",
+          "principal"
+        ],
+        "description": "Group scope filter for controlling group visibility"
+      },
       "Groups.AddPrincipalsInput": {
         "type": "object",
         "properties": {
@@ -3700,6 +3928,7 @@
           "uuid",
           "name",
           "principal_count",
+          "role_count",
           "created",
           "modified",
           "system",
@@ -3730,7 +3959,13 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0,
-            "description": "Number of principals in the group"
+            "description": "Number of user principals in the group (does not count service accounts, matching V1 principalCount semantics)"
+          },
+          "role_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0,
+            "description": "Number of roles assigned to this group via role bindings"
           },
           "created": {
             "type": "string",
@@ -3977,15 +4212,37 @@
             "type": "integer",
             "format": "int32",
             "description": "Number of groups the principal belongs to"
+          },
+          "display_name": {
+            "type": "string",
+            "description": "Display name of the service account. Only present for service-account principals."
+          },
+          "description": {
+            "type": "string",
+            "nullable": true,
+            "description": "Description of the service account. Only present for service-account principals."
+          },
+          "owner": {
+            "type": "string",
+            "description": "Owner username of the service account. Only present for service-account principals."
+          },
+          "time_created": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix timestamp when the service account was created. Only present for service-account principals."
           }
         },
         "example": {
-          "uuid": "550e8400-e29b-41d4-a716-446655440002",
-          "username": "jdoe",
-          "type": "user",
-          "user_id": "12345",
-          "service_account_id": null,
-          "group_count": 3
+          "uuid": "660e8400-e29b-41d4-a716-446655440003",
+          "username": "service-account-abc123",
+          "type": "service-account",
+          "user_id": null,
+          "service_account_id": "abc123",
+          "group_count": 1,
+          "display_name": "My Service Account",
+          "description": "Automation service account",
+          "owner": "jdoe",
+          "time_created": 1700000000
         }
       },
       "PrincipalListResponse": {
@@ -4017,6 +4274,15 @@
           "service-account"
         ],
         "description": "Principal type"
+      },
+      "PrincipalTypeFilter": {
+        "type": "string",
+        "enum": [
+          "user",
+          "service-account",
+          "all"
+        ],
+        "description": "Principal type filter for listing principals. Extends PrincipalType with 'all' to return both users and service accounts."
       },
       "Problems.Problem400": {
         "type": "object",
@@ -5025,6 +5291,14 @@
             "$ref": "#/components/schemas/RoleBindings.BaseSubject"
           }
         ]
+      },
+      "RoleDiscriminator": {
+        "type": "string",
+        "enum": [
+          "any",
+          "all"
+        ],
+        "description": "Role name matching discriminator for the role_names filter"
       },
       "Roles.BatchDeleteRolesRequest": {
         "type": "object",
