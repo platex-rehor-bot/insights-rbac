@@ -208,7 +208,14 @@
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Problems.Problem400"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Problems.Problem400"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Problems.Problem400AlreadyExists"
+                    }
+                  ]
                 }
               }
             }
@@ -918,14 +925,16 @@
                       "username": "jdoe",
                       "type": "user",
                       "user_id": "12345",
-                      "service_account_id": null
+                      "service_account_id": null,
+                      "group_count": 3
                     },
                     {
                       "uuid": "660e8400-e29b-41d4-a716-446655440003",
                       "username": "service-account-abc123",
                       "type": "service-account",
                       "user_id": null,
-                      "service_account_id": "abc123"
+                      "service_account_id": "abc123",
+                      "group_count": 1
                     }
                   ]
                 }
@@ -1006,7 +1015,8 @@
                   "username": "jdoe",
                   "type": "user",
                   "user_id": "12345",
-                  "service_account_id": null
+                  "service_account_id": null,
+                  "group_count": 3
                 }
               }
             }
@@ -1340,7 +1350,7 @@
       "get": {
         "operationId": "RoleBindings_listBySubject",
         "summary": "List role bindings grouped by subject",
-        "description": "List role bindings grouped by subject. subject_type (optional) is user or group only, with subject_id as UUID. granted_subject_type, granted_subject_id, and granted_subject.principal.user_id are not query parameters on this path\u2014use GET /role-bindings/ for those filters.",
+        "description": "List role bindings grouped by subject. subject_type (optional) is user or group only, with subject_id as UUID. granted_subject_type, granted_subject_id, and granted_subject.principal.user_id are not query parameters on this path—use GET /role-bindings/ for those filters.",
         "parameters": [
           {
             "name": "limit",
@@ -2819,6 +2829,24 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Service unavailable.",
+            "headers": {
+              "Retry-After": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problems.Problem503"
+                }
+              }
+            }
           }
         },
         "tags": [
@@ -3036,6 +3064,24 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problems.Problem500"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service unavailable.",
+            "headers": {
+              "Retry-After": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problems.Problem503"
                 }
               }
             }
@@ -3672,7 +3718,7 @@
           "name": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 255,
+            "maxLength": 150,
             "description": "Name of the group"
           },
           "description": {
@@ -3719,7 +3765,7 @@
           "name": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 255,
+            "maxLength": 150,
             "description": "Name of the group"
           },
           "description": {
@@ -3893,7 +3939,8 @@
           "username",
           "type",
           "user_id",
-          "service_account_id"
+          "service_account_id",
+          "group_count"
         ],
         "properties": {
           "uuid": {
@@ -3925,6 +3972,11 @@
             "type": "string",
             "nullable": true,
             "description": "Service account client ID. Null for users."
+          },
+          "group_count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of groups the principal belongs to"
           }
         },
         "example": {
@@ -3932,7 +3984,8 @@
           "username": "jdoe",
           "type": "user",
           "user_id": "12345",
-          "service_account_id": null
+          "service_account_id": null,
+          "group_count": 3
         }
       },
       "PrincipalListResponse": {
@@ -4309,6 +4362,58 @@
           }
         ]
       },
+      "Problems.Problem503": {
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "detail"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "http://project-kessel.org/problems/service-unavailable"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "enum": [
+              "A downstream dependency is temporarily unavailable. Please retry shortly."
+            ]
+          },
+          "detail": {
+            "type": "string",
+            "example": "Inventory authorization is temporarily unavailable. Please try again shortly."
+          }
+        },
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "$ref": "#/components/schemas/Problems.ProblemType"
+              },
+              "status": {
+                "type": "number",
+                "enum": [
+                  503
+                ]
+              },
+              "title": {
+                "type": "string"
+              },
+              "detail": {
+                "type": "string"
+              },
+              "instance": {
+                "type": "string",
+                "format": "uri"
+              }
+            }
+          }
+        ]
+      },
       "Problems.ProblemType": {
         "type": "string",
         "enum": [
@@ -4319,6 +4424,7 @@
           "http://project-kessel.org/problems/invalid-request",
           "http://project-kessel.org/problems/already-exists",
           "http://project-kessel.org/problems/workspace-not-empty",
+          "http://project-kessel.org/problems/service-unavailable",
           "http://project-kessel.org/problems/conflict"
         ]
       },

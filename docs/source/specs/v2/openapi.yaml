@@ -133,7 +133,9 @@ paths:
           content:
             application/problem+json:
               schema:
-                $ref: '#/components/schemas/Problems.Problem400'
+                anyOf:
+                  - $ref: '#/components/schemas/Problems.Problem400'
+                  - $ref: '#/components/schemas/Problems.Problem400AlreadyExists'
         '401':
           description: Access is unauthorized.
           content:
@@ -575,11 +577,13 @@ paths:
                     type: user
                     user_id: '12345'
                     service_account_id: null
+                    group_count: 3
                   - uuid: 660e8400-e29b-41d4-a716-446655440003
                     username: service-account-abc123
                     type: service-account
                     user_id: null
                     service_account_id: abc123
+                    group_count: 1
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -630,6 +634,7 @@ paths:
                 type: user
                 user_id: '12345'
                 service_account_id: null
+                group_count: 3
         '400':
           description: The server could not understand the request due to invalid syntax.
           content:
@@ -1778,6 +1783,17 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problems.Problem500'
+        '503':
+          description: Service unavailable.
+          headers:
+            Retry-After:
+              required: true
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problems.Problem503'
       tags:
         - Workspaces
     post:
@@ -1918,6 +1934,17 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problems.Problem500'
+        '503':
+          description: Service unavailable.
+          headers:
+            Retry-After:
+              required: true
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problems.Problem503'
       tags:
         - Workspaces
       requestBody:
@@ -2335,7 +2362,7 @@ components:
         name:
           type: string
           minLength: 1
-          maxLength: 255
+          maxLength: 150
           description: Name of the group
         description:
           type: string
@@ -2371,7 +2398,7 @@ components:
         name:
           type: string
           minLength: 1
-          maxLength: 255
+          maxLength: 150
           description: Name of the group
         description:
           type: string
@@ -2510,6 +2537,7 @@ components:
         - type
         - user_id
         - service_account_id
+        - group_count
       properties:
         uuid:
           allOf:
@@ -2530,12 +2558,17 @@ components:
           type: string
           nullable: true
           description: Service account client ID. Null for users.
+        group_count:
+          type: integer
+          format: int32
+          description: Number of groups the principal belongs to
       example:
         uuid: 550e8400-e29b-41d4-a716-446655440002
         username: jdoe
         type: user
         user_id: '12345'
         service_account_id: null
+        group_count: 3
     PrincipalListResponse:
       type: object
       required:
@@ -2779,6 +2812,40 @@ components:
             instance:
               type: string
               format: uri
+    Problems.Problem503:
+      type: object
+      required:
+        - type
+        - title
+        - detail
+      properties:
+        type:
+          type: string
+          enum:
+            - http://project-kessel.org/problems/service-unavailable
+        title:
+          type: string
+          enum:
+            - A downstream dependency is temporarily unavailable. Please retry shortly.
+        detail:
+          type: string
+          example: Inventory authorization is temporarily unavailable. Please try again shortly.
+      allOf:
+        - type: object
+          properties:
+            type:
+              $ref: '#/components/schemas/Problems.ProblemType'
+            status:
+              type: number
+              enum:
+                - 503
+            title:
+              type: string
+            detail:
+              type: string
+            instance:
+              type: string
+              format: uri
     Problems.ProblemType:
       type: string
       enum:
@@ -2789,6 +2856,7 @@ components:
         - http://project-kessel.org/problems/invalid-request
         - http://project-kessel.org/problems/already-exists
         - http://project-kessel.org/problems/workspace-not-empty
+        - http://project-kessel.org/problems/service-unavailable
         - http://project-kessel.org/problems/conflict
     Problems.Workspace.Problem400WorkspaceNotEmpty:
       type: object
