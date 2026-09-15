@@ -1975,7 +1975,7 @@ namespace Groups {
         @query username?: string;
         @doc("Filter by principal username (case-insensitive substring match). Applies to both user and service-account principals.")
         @query principal_username?: string;
-        @doc("When true, return only usernames without enrichment from external identity services. Applies to user principals only.")
+        @doc("When true, skip external identity service enrichment and return principals sourced only from the local database. The response still uses PrincipalListResponse but external-only fields (e.g. email, first_name, last_name) will be absent. Applies to user principals only.")
         @query username_only?: boolean = false;
         @doc("When true, return only org admin users. Applies to user principals only.")
         @query admin_only?: boolean = false;
@@ -2017,7 +2017,7 @@ namespace Groups {
     ): NoContentResponse | Problems.CommonProblems | Problems.Problem404;
 
     @route("{uuid}/principals/")
-    @doc("Remove principals from a group in bulk. At least one of usernames or service_accounts must be provided. All specified principals must be members of the group; if any are not found, the request returns 404 and no removals are performed. Protected-group behavior: system groups return 400.")
+    @doc("Remove principals from a group in bulk. At least one of usernames or service-accounts must be provided. All specified principals must be members of the group; if any are not found, the request returns 404 and no removals are performed. Protected-group behavior: system groups return 400.")
     @summary("Remove principals from a group in bulk")
     @delete op removePrincipals(
         @path uuid: UUID;

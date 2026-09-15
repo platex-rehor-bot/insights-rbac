@@ -634,7 +634,7 @@
             "name": "username_only",
             "in": "query",
             "required": false,
-            "description": "When true, return only usernames without enrichment from external identity services. Applies to user principals only.",
+            "description": "When true, skip external identity service enrichment and return principals sourced only from the local database. The response still uses PrincipalListResponse but external-only fields (e.g. email, first_name, last_name) will be absent. Applies to user principals only.",
             "schema": {
               "type": "boolean",
               "default": false
@@ -880,7 +880,7 @@
       "delete": {
         "operationId": "Groups_removePrincipals",
         "summary": "Remove principals from a group in bulk",
-        "description": "Remove principals from a group in bulk. At least one of usernames or service_accounts must be provided. All specified principals must be members of the group; if any are not found, the request returns 404 and no removals are performed. Protected-group behavior: system groups return 400.",
+        "description": "Remove principals from a group in bulk. At least one of usernames or service-accounts must be provided. All specified principals must be members of the group; if any are not found, the request returns 404 and no removals are performed. Protected-group behavior: system groups return 400.",
         "parameters": [
           {
             "name": "uuid",
@@ -1570,7 +1570,7 @@
       "get": {
         "operationId": "RoleBindings_listBySubject",
         "summary": "List role bindings grouped by subject",
-        "description": "List role bindings grouped by subject. subject_type (optional) is user or group only, with subject_id as UUID. granted_subject_type, granted_subject_id, and granted_subject.principal.user_id are not query parameters on this path\u2014use GET /role-bindings/ for those filters.",
+        "description": "List role bindings grouped by subject. subject_type (optional) is user or group only, with subject_id as UUID. granted_subject_type, granted_subject_id, and granted_subject.principal.user_id are not query parameters on this path—use GET /role-bindings/ for those filters.",
         "parameters": [
           {
             "name": "limit",
