@@ -1965,7 +1965,7 @@ namespace Groups {
     }
 
     @route("{uuid}/principals/")
-    @doc("List principals who are members of this group. When principal_type is 'all' or omitted, the response contains a unified Principal[] with the type field distinguishing users from service accounts.")
+    @doc("List principals who are members of this group. The default is principal_type=user. When principal_type is 'all', the response contains a unified Principal[] with the type field distinguishing users from service accounts.")
     @summary("List group principals")
     @get op listPrincipals(
         @path uuid: UUID;

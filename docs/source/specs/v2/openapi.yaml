@@ -361,7 +361,7 @@ paths:
     get:
       operationId: Groups_listPrincipals
       summary: List group principals
-      description: List principals who are members of this group. When principal_type is 'all' or omitted, the response contains a unified Principal[] with the type field distinguishing users from service accounts.
+      description: List principals who are members of this group. The default is principal_type=user. When principal_type is 'all', the response contains a unified Principal[] with the type field distinguishing users from service accounts.
       parameters:
         - name: uuid
           in: path
