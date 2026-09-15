@@ -217,6 +217,7 @@ namespace Problems {
         AlreadyExists:"http://project-kessel.org/problems/already-exists",
         WorkspaceNotEmpty:"http://project-kessel.org/problems/workspace-not-empty",
         ServiceUnavailable:"http://project-kessel.org/problems/service-unavailable",
+        Conflict:"http://project-kessel.org/problems/conflict",
     }
 
     @error
@@ -283,6 +284,14 @@ namespace Problems {
     model Problem400AlreadyExists extends ProblemDetails<Status = 400>{
         type: ProblemType.AlreadyExists,
         title: "The resource already exists.";
+    }
+
+    @error
+    model Problem409 extends ProblemDetails<Status = 409>{
+        type: ProblemType.Conflict,
+        title: "The request conflicts with the current state of the resource.",
+        @example("Cannot delete group with active role bindings.")
+        detail: string
     }
 
     alias CommonProblems = Problem400 | Problem401 | Problem403 | Problem500;
@@ -1840,8 +1849,16 @@ namespace Groups {
     @get op list(
         @doc("Filter by name (substring or glob with *)")
         @query name?: string;
-        @doc("Filter by workspace UUIDs")
+        @doc("Filter by group UUIDs")
         @query(#{explode: false}) uuid?: UUID[];
+        @doc("Filter groups that contain this username as a member")
+        @query username?: string;
+        @doc("Filter by system group flag")
+        @query system?: boolean;
+        @doc("Filter by platform default group flag")
+        @query platform_default?: boolean;
+        @doc("Filter by admin default group flag")
+        @query admin_default?: boolean;
         @doc("Order by field (prefix - for descending). Allowed: name, modified, principal_count")
         @query order_by?: string = "name";
         @query limit?: Limit = DefaultLimit;
@@ -1874,7 +1891,7 @@ namespace Groups {
     @summary("Delete a group")
     @delete op destroy(
         @path uuid: UUID;
-    ): NoContentResponse | Problems.CommonProblems | Problems.Problem404 | Problems.Problem400;
+    ): NoContentResponse | Problems.CommonProblems | Problems.Problem404 | Problems.Problem409;
 
     model PrincipalListResponse {
         @statusCode _: 200;
@@ -1888,18 +1905,22 @@ namespace Groups {
     @summary("List group principals")
     @get op listPrincipals(
         @path uuid: UUID;
+        @doc("Filter by principal type: user or service-account")
+        @query principal_type?: PrincipalType;
+        @doc("Filter by username (substring match)")
+        @query username?: string;
         @query limit?: Limit = DefaultLimit;
         @query offset?: Offset = DefaultOffset;
         @query order_by?: string = "username";
     ): PrincipalListResponse | Problems.CommonProblems | Problems.Problem404;
 
     model AddPrincipalsInput {
-        @doc("Usernames to add")
-        @minItems(0)
+        @doc("Usernames to add. At least one of usernames or service_accounts must be provided with items.")
+        @minItems(1)
         usernames?: string[];
-        @doc("Service account client IDs to add. At least one of usernames or service_accounts must contain items.")
+        @doc("Service account client IDs to add. At least one of usernames or service_accounts must be provided with items.")
         @example(#["abc-123-def"])
-        @minItems(0)
+        @minItems(1)
         service_accounts?: string[];
     }
 

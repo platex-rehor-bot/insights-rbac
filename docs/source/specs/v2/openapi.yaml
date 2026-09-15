@@ -25,11 +25,39 @@ paths:
         - name: uuid
           in: query
           required: false
-          description: Filter by workspace UUIDs
+          description: Filter by group UUIDs
           schema:
             type: array
             items:
               $ref: '#/components/schemas/UUID'
+          explode: false
+        - name: username
+          in: query
+          required: false
+          description: Filter groups that contain this username as a member
+          schema:
+            type: string
+          explode: false
+        - name: system
+          in: query
+          required: false
+          description: Filter by system group flag
+          schema:
+            type: boolean
+          explode: false
+        - name: platform_default
+          in: query
+          required: false
+          description: Filter by platform default group flag
+          schema:
+            type: boolean
+          explode: false
+        - name: admin_default
+          in: query
+          required: false
+          description: Filter by admin default group flag
+          schema:
+            type: boolean
           explode: false
         - name: order_by
           in: query
@@ -255,9 +283,7 @@ paths:
           content:
             application/problem+json:
               schema:
-                anyOf:
-                  - $ref: '#/components/schemas/Problems.Problem400'
-                  - $ref: '#/components/schemas/Problems.Problem400'
+                $ref: '#/components/schemas/Problems.Problem400'
         '401':
           description: Access is unauthorized.
           content:
@@ -276,6 +302,12 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problems.Problem404'
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problems.Problem409'
         '500':
           description: Server error
           content:
@@ -295,6 +327,20 @@ paths:
           required: true
           schema:
             $ref: '#/components/schemas/UUID'
+        - name: principal_type
+          in: query
+          required: false
+          description: 'Filter by principal type: user or service-account'
+          schema:
+            $ref: '#/components/schemas/PrincipalType'
+          explode: false
+        - name: username
+          in: query
+          required: false
+          description: Filter by username (substring match)
+          schema:
+            type: string
+          explode: false
         - name: limit
           in: query
           required: false
@@ -1732,17 +1778,6 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problems.Problem500'
-        '503':
-          description: Service unavailable.
-          headers:
-            Retry-After:
-              required: true
-              schema:
-                type: string
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problems.Problem503'
       tags:
         - Workspaces
     post:
@@ -1883,17 +1918,6 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problems.Problem500'
-        '503':
-          description: Service unavailable.
-          headers:
-            Retry-After:
-              required: true
-              schema:
-                type: string
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problems.Problem503'
       tags:
         - Workspaces
       requestBody:
@@ -2282,14 +2306,14 @@ components:
           type: array
           items:
             type: string
-          minItems: 0
-          description: Usernames to add
+          minItems: 1
+          description: Usernames to add. At least one of usernames or service_accounts must be provided with items.
         service_accounts:
           type: array
           items:
             type: string
-          minItems: 0
-          description: Service account client IDs to add. At least one of usernames or service_accounts must contain items.
+          minItems: 1
+          description: Service account client IDs to add. At least one of usernames or service_accounts must be provided with items.
           example:
             - abc-123-def
     Groups.Group:
@@ -2691,6 +2715,40 @@ components:
             instance:
               type: string
               format: uri
+    Problems.Problem409:
+      type: object
+      required:
+        - type
+        - title
+        - detail
+      properties:
+        type:
+          type: string
+          enum:
+            - http://project-kessel.org/problems/conflict
+        title:
+          type: string
+          enum:
+            - The request conflicts with the current state of the resource.
+        detail:
+          type: string
+          example: Cannot delete group with active role bindings.
+      allOf:
+        - type: object
+          properties:
+            type:
+              $ref: '#/components/schemas/Problems.ProblemType'
+            status:
+              type: number
+              enum:
+                - 409
+            title:
+              type: string
+            detail:
+              type: string
+            instance:
+              type: string
+              format: uri
     Problems.Problem500:
       type: object
       required:
@@ -2721,40 +2779,6 @@ components:
             instance:
               type: string
               format: uri
-    Problems.Problem503:
-      type: object
-      required:
-        - type
-        - title
-        - detail
-      properties:
-        type:
-          type: string
-          enum:
-            - http://project-kessel.org/problems/service-unavailable
-        title:
-          type: string
-          enum:
-            - A downstream dependency is temporarily unavailable. Please retry shortly.
-        detail:
-          type: string
-          example: Inventory authorization is temporarily unavailable. Please try again shortly.
-      allOf:
-        - type: object
-          properties:
-            type:
-              $ref: '#/components/schemas/Problems.ProblemType'
-            status:
-              type: number
-              enum:
-                - 503
-            title:
-              type: string
-            detail:
-              type: string
-            instance:
-              type: string
-              format: uri
     Problems.ProblemType:
       type: string
       enum:
@@ -2765,7 +2789,7 @@ components:
         - http://project-kessel.org/problems/invalid-request
         - http://project-kessel.org/problems/already-exists
         - http://project-kessel.org/problems/workspace-not-empty
-        - http://project-kessel.org/problems/service-unavailable
+        - http://project-kessel.org/problems/conflict
     Problems.Workspace.Problem400WorkspaceNotEmpty:
       type: object
       required:
