@@ -1540,7 +1540,8 @@ class FencingTokenRebalanceTests(TestCase):
         listener = RebalanceListener(self.consumer)
         # Note: Kafka library passes a set of TopicPartition objects, not a list
         # on_partitions_assigned is async (AsyncConsumerRebalanceListener)
-        asyncio.run(listener.on_partitions_assigned({self.partition}))
+        result = asyncio.run(listener.on_partitions_assigned({self.partition}))
+        self.assertIsNone(result)
 
         # Verify lock was acquired
         mock_acquire_lock.assert_called_once_with("test-consumer-group/0")
@@ -1564,7 +1565,8 @@ class FencingTokenRebalanceTests(TestCase):
         # Should NOT raise - instead sets a flag for later detection
         # Note: Kafka library passes a set of TopicPartition objects, not a list
         # on_partitions_assigned is async (AsyncConsumerRebalanceListener)
-        asyncio.run(listener.on_partitions_assigned({self.partition}))
+        result = asyncio.run(listener.on_partitions_assigned({self.partition}))
+        self.assertIsNone(result)
 
         # Verify lock state was cleared
         self.assertIsNone(self.consumer.lock_id)
@@ -1593,7 +1595,8 @@ class FencingTokenRebalanceTests(TestCase):
 
         # This should not raise "'set' object is not subscriptable"
         # on_partitions_assigned is async (AsyncConsumerRebalanceListener)
-        asyncio.run(listener.on_partitions_assigned(assigned_partitions))
+        result = asyncio.run(listener.on_partitions_assigned(assigned_partitions))
+        self.assertIsNone(result)
 
         # Verify lock was acquired successfully
         mock_acquire_lock.assert_called_once_with("test-consumer-group/0")
@@ -1692,7 +1695,8 @@ class FencingTokenRebalanceTests(TestCase):
         listener = RebalanceListener(self.consumer)
 
         # Call through the async wrapper, same as Kafka library would
-        asyncio.run(listener.on_partitions_revoked([self.partition]))
+        result = asyncio.run(listener.on_partitions_revoked([self.partition]))
+        self.assertIsNone(result)
 
         # Verify lock was cleared
         self.assertIsNone(self.consumer.lock_id)
