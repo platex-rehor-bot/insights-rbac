@@ -1674,6 +1674,33 @@ class FencingTokenRebalanceTests(TestCase):
         # Verify offsets were committed
         self.consumer.offset_manager.commit.assert_called_once()
 
+    def test_partition_revocation_via_async_listener(self):
+        """Test that on_partitions_revoked works through the async wrapper.
+
+        The RebalanceListener.on_partitions_revoked is an async method that
+        dispatches blocking work (offset commit, lock clearing) to a worker
+        thread via asyncio.to_thread(). This test exercises that code path,
+        mirroring the pattern used for on_partitions_assigned tests.
+        """
+        from core.kafka_consumer import RebalanceListener
+
+        # Set up lock state
+        self.consumer.lock_id = "test-consumer-group/0"
+        self.consumer.lock_token = "test-token-12345"
+        self.consumer.offset_manager.commit.return_value = (True, 5)
+
+        listener = RebalanceListener(self.consumer)
+
+        # Call through the async wrapper, same as Kafka library would
+        asyncio.run(listener.on_partitions_revoked([self.partition]))
+
+        # Verify lock was cleared
+        self.assertIsNone(self.consumer.lock_id)
+        self.assertIsNone(self.consumer.lock_token)
+
+        # Verify offsets were committed
+        self.consumer.offset_manager.commit.assert_called_once()
+
 
 class FencingTokenProcessingTests(TestCase):
     """Tests for fencing token in message processing."""
