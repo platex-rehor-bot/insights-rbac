@@ -26,29 +26,27 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/2.0/ref/settings/
 """
 
+import datetime
+import logging
 import os
 import ssl
+import sys
 from urllib.parse import quote as _url_quote
 
-import datetime
-import sys
-import logging
 import pytz
 import redis
-
+from app_common_python import DependencyEndpoints, KafkaTopics, LoadedConfig
 from boto3 import client as boto_client
 from corsheaders.defaults import default_headers
 from dateutil.parser import parse as parse_dt
-from app_common_python import LoadedConfig, KafkaTopics, DependencyEndpoints
 from feature_flags import FEATURE_FLAGS
+
+from . import database
+from .env import ENVIRONMENT
 
 # Database
 # https://docs.djangoproject.com/en/2.0/ref/settings/#databases
 
-
-from . import database
-
-from .env import ENVIRONMENT
 
 # Sentry monitoring configuration
 # Note: Sentry is disabled unless it is explicitly turned on by setting DSN
@@ -73,17 +71,27 @@ GIT_COMMIT = ENVIRONMENT.get_value("GIT_COMMIT", default="local-dev")
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/2.0/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-# The SECRET_KEY is provided via an environment variable in OpenShift
-SECRET_KEY = os.getenv(
-    "DJANGO_SECRET_KEY",
-    # safe value used for development when DJANGO_SECRET_KEY might not be set
-    "asvuhxowz)zjbo4%7pc$ek1nbfh_-#%$bq_x8tkh=#e24825=5",
-)
-
 # SECURITY WARNING: don't run with debug turned on in production!
 # Default value: False
 DEBUG = False if os.getenv("DJANGO_DEBUG", "False") == "False" else True  # pylint: disable=R1719
+
+# SECURITY WARNING: keep the secret key used in production secret!
+# The SECRET_KEY is provided via an environment variable in OpenShift.
+# In non-DEBUG mode the key MUST be set explicitly; in DEBUG mode a random
+# key is generated so that local dev / test harnesses work without config.
+_secret_key = os.getenv("DJANGO_SECRET_KEY")
+# Note: empty string is intentionally treated as unset (bool("") is False),
+# so DJANGO_SECRET_KEY="" falls through to the DEBUG/error branch below.
+if _secret_key:
+    SECRET_KEY = _secret_key
+elif DEBUG:
+    from django.core.management.utils import get_random_secret_key
+
+    SECRET_KEY = get_random_secret_key()
+else:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured("DJANGO_SECRET_KEY environment variable is required when DEBUG is False.")
 
 ALLOWED_HOSTS = ["*"]
 
@@ -402,6 +410,8 @@ else:
 CLOWDER_ENABLED = ENVIRONMENT.bool("CLOWDER_ENABLED", default=False)
 
 FEATURE_FLAGS_CACHE_DIR = ENVIRONMENT.get_value("FEATURE_FLAGS_CACHE_DIR", default="/tmp/")
+UNLEASH_REFRESH_INTERVAL = ENVIRONMENT.int("UNLEASH_REFRESH_INTERVAL", default=30)
+UNLEASH_REQUEST_TIMEOUT = ENVIRONMENT.int("UNLEASH_REQUEST_TIMEOUT", default=30)
 
 ACCESS_CACHE_DB = 1
 ACCESS_CACHE_LIFETIME = 10 * 60
@@ -470,7 +480,9 @@ ROLE_CREATE_ALLOW_LIST = ENVIRONMENT.get_value("ROLE_CREATE_ALLOW_LIST", default
 # Dual write migration configuration
 REPLICATION_TO_RELATION_ENABLED = ENVIRONMENT.bool("REPLICATION_TO_RELATION_ENABLED", default=False)
 EPH_ENV = ENVIRONMENT.bool("EPH_ENV", default=False)
-V2_MIGRATION_APP_EXCLUDE_LIST = ENVIRONMENT.get_value("V2_MIGRATION_APP_EXCLUDE_LIST", default="").split(",")
+V2_MIGRATION_APP_EXCLUDE_LIST = [
+    app.strip() for app in ENVIRONMENT.get_value("V2_MIGRATION_APP_EXCLUDE_LIST", default="").split(",") if app.strip()
+]
 V2_BOOTSTRAP_TENANT = ENVIRONMENT.bool("V2_BOOTSTRAP_TENANT", default=False)
 
 # Migration Setup
@@ -532,6 +544,18 @@ RBAC_KAFKA_CUSTOM_CONSUMER_BROKER = ENVIRONMENT.get_value("RBAC_KAFKA_CUSTOM_CON
 
 KAFKA_PRINCIPAL_CLEANUP_TOPIC = ENVIRONMENT.get_value("KAFKA_PRINCIPAL_CLEANUP_TOPIC", default="")
 KAFKA_PRINCIPAL_CLEANUP_DLQ_TOPIC = ENVIRONMENT.get_value("KAFKA_PRINCIPAL_CLEANUP_DLQ_TOPIC", default="")
+KAFKA_PRINCIPAL_CLEANUP_SESSION_TIMEOUT_MS = ENVIRONMENT.get_value(
+    "KAFKA_PRINCIPAL_CLEANUP_SESSION_TIMEOUT_MS", default=45000
+)
+KAFKA_PRINCIPAL_CLEANUP_HEARTBEAT_INTERVAL_MS = ENVIRONMENT.get_value(
+    "KAFKA_PRINCIPAL_CLEANUP_HEARTBEAT_INTERVAL_MS", default=15000
+)
+KAFKA_PRINCIPAL_CLEANUP_MAX_POLL_INTERVAL_MS = ENVIRONMENT.get_value(
+    "KAFKA_PRINCIPAL_CLEANUP_MAX_POLL_INTERVAL_MS", default=300000
+)
+KAFKA_PRINCIPAL_CLEANUP_STATIC_MEMBERSHIP_ENABLED = ENVIRONMENT.bool(
+    "KAFKA_PRINCIPAL_CLEANUP_STATIC_MEMBERSHIP_ENABLED", default=True
+)
 
 # if we don't enable KAFKA we can't use the notifications
 if not KAFKA_ENABLED:
@@ -605,6 +629,29 @@ if KAFKA_ENABLED:
     clowder_principal_cleanup_dlq_topic = KafkaTopics.get(KAFKA_PRINCIPAL_CLEANUP_DLQ_TOPIC)
     if clowder_principal_cleanup_dlq_topic:
         KAFKA_PRINCIPAL_CLEANUP_DLQ_TOPIC = clowder_principal_cleanup_dlq_topic.name
+
+
+IT_KAFKA_BOOTSTRAP_SERVERS = ENVIRONMENT.get_value("IT_KAFKA_BOOTSTRAP_SERVERS", default="")
+IT_KAFKA_USERNAME = ENVIRONMENT.get_value("IT_KAFKA_USERNAME", default="")
+IT_KAFKA_PASSWORD = ENVIRONMENT.get_value("IT_KAFKA_PASSWORD", default="")
+IT_KAFKA_SASL_MECHANISM = ENVIRONMENT.get_value("IT_KAFKA_SASL_MECHANISM", default="SCRAM-SHA-512")
+IT_KAFKA_SECURITY_PROTOCOL = ENVIRONMENT.get_value("IT_KAFKA_SECURITY_PROTOCOL", default="SASL_SSL")
+
+IT_KAFKA_SERVERS = [server.strip() for server in IT_KAFKA_BOOTSTRAP_SERVERS.split(",") if server.strip()]
+IT_KAFKA_AUTH = {}
+if IT_KAFKA_SERVERS and IT_KAFKA_USERNAME and IT_KAFKA_PASSWORD:
+    IT_KAFKA_AUTH = {
+        "bootstrap_servers": IT_KAFKA_SERVERS,
+        "sasl_plain_username": IT_KAFKA_USERNAME,
+        "sasl_plain_password": IT_KAFKA_PASSWORD,
+        "sasl_mechanism": IT_KAFKA_SASL_MECHANISM.upper(),
+        "security_protocol": IT_KAFKA_SECURITY_PROTOCOL.upper(),
+        "retries": 5,  # producer-only; PRODUCER_ONLY_CONFIGS strips it for consumers
+    }
+
+KAFKA_CLUSTERS = {
+    "it_managed": {"servers": IT_KAFKA_SERVERS, "auth": IT_KAFKA_AUTH},
+}
 
 # BOP TLS settings
 if ENVIRONMENT.bool("CLOWDER_ENABLED", default=False) and ENVIRONMENT.bool("USE_CLOWDER_CA_FOR_BOP", default=False):
@@ -746,6 +793,7 @@ WORKSPACE_ACCESS_TIMING_ENABLED = ENVIRONMENT.bool("WORKSPACE_ACCESS_TIMING_ENAB
 ROOT_SCOPE_PERMISSIONS = ENVIRONMENT.get_value("ROOT_SCOPE_PERMISSIONS", default="")
 TENANT_SCOPE_PERMISSIONS = ENVIRONMENT.get_value("TENANT_SCOPE_PERMISSIONS", default="")
 DEFAULT_SCOPE_PERMISSIONS = ENVIRONMENT.get_value("DEFAULT_SCOPE_PERMISSIONS", default="")
+ALL_SCOPE_PERMISSIONS = ENVIRONMENT.get_value("ALL_SCOPE_PERMISSIONS", default="")
 
 # Whether to enable automatic scope migration during seeding. (This is intended to allow the migrations to be run
 # manually before enabling the automatic runs, thus preventing the migration running sequentially for all roles on the

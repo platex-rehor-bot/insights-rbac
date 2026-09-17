@@ -33,7 +33,7 @@ from management.group.definer import seed_group
 from management.group.platform import DefaultGroupNotAvailableError, GlobalPolicyIdService
 from management.notifications.notification_handlers import role_obj_change_notification_handler
 from management.permission.model import Permission
-from management.permission.scope_service import ImplicitResourceService, Scope
+from management.permission.scope_service import CONCRETE_SCOPES, ImplicitResourceService
 from management.relation_replicator.relation_replicator import ReplicationEventType
 from management.role.model import Access, ExtRoleRelation, ExtTenant, ResourceDefinition, Role, RoleScopeState
 from management.role.platform import (
@@ -438,7 +438,7 @@ def _seed_platform_roles():
     platform_roles = {}
 
     for access_type in DefaultAccessType:
-        for scope in Scope:
+        for scope in CONCRETE_SCOPES:
             try:
                 platform_role = _create_single_platform_role(access_type, scope, policy_service, public_tenant)
                 platform_roles[(access_type, scope)] = platform_role
