@@ -17,7 +17,6 @@
 
 """RBAC Kafka consumer for processing Debezium and replication messages."""
 
-import asyncio
 import enum
 import json
 import logging
@@ -37,6 +36,7 @@ from internal.migration_coordination import notify_migration_batch_completion
 from kafka import KafkaConsumer, TopicPartition
 from kafka.consumer.subscription_state import AsyncConsumerRebalanceListener
 from kafka.errors import KafkaError
+from kafka.future import Future as KafkaFuture
 from kafka.structs import OffsetAndMetadata
 from kessel.relations.v1beta1 import common_pb2
 from management.relation_replicator.relations_api_replicator import (
@@ -629,9 +629,36 @@ class RebalanceListener(AsyncConsumerRebalanceListener):
     """Listen for Kafka consumer rebalance events.
 
     Uses AsyncConsumerRebalanceListener so that blocking IO (offset commits,
-    gRPC lock acquisition) runs in a worker thread via asyncio.to_thread(),
-    keeping the consumer's IO / heartbeat loop responsive.
+    gRPC lock acquisition) runs in a worker thread, keeping the consumer's
+    IO / heartbeat loop responsive.
+
+    Note: kafka-python 3.x uses its own event loop (NetworkSelector), not
+    asyncio. Standard asyncio primitives like asyncio.to_thread() will raise
+    ``RuntimeError: no running event loop``. Instead, we bridge to worker
+    threads using kafka's own ``Future`` which the NetworkSelector can
+    ``await`` natively.
     """
+
+    @staticmethod
+    def _run_in_thread(fn, *args):
+        """Run a blocking function in a daemon thread, returning a KafkaFuture.
+
+        The returned KafkaFuture is compatible with kafka-python's internal
+        event loop, so ``await future`` properly yields control back to the
+        NetworkSelector (keeping heartbeats alive) until the thread completes.
+        """
+        future = KafkaFuture()
+
+        def _target():
+            try:
+                result = fn(*args)
+                future.success(result)
+            except Exception as exc:
+                future.failure(exc)
+
+        thread = threading.Thread(target=_target, daemon=True)
+        thread.start()
+        return future
 
     def __init__(self, consumer_instance):
         """Initialize the rebalance listener.
@@ -650,7 +677,7 @@ class RebalanceListener(AsyncConsumerRebalanceListener):
         Args:
             revoked: List of TopicPartition objects being revoked
         """
-        await asyncio.to_thread(self.consumer_instance._on_partitions_revoked, revoked)
+        await self._run_in_thread(self.consumer_instance._on_partitions_revoked, revoked)
 
     async def on_partitions_assigned(self, assigned):
         """Handle partition assignment during rebalance.
@@ -694,7 +721,7 @@ class RebalanceListener(AsyncConsumerRebalanceListener):
             try:
                 # Acquire lock token from Relations API in a worker thread
                 # to avoid blocking the consumer IO / heartbeat loop
-                lock_token = await asyncio.to_thread(self.consumer_instance._acquire_lock_with_retry, lock_id)
+                lock_token = await self._run_in_thread(self.consumer_instance._acquire_lock_with_retry, lock_id)
 
                 # Record successful acquisition
                 duration = time.time() - start_time
