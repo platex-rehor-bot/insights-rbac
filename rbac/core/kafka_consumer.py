@@ -639,15 +639,24 @@ class RebalanceListener(AsyncConsumerRebalanceListener):
     ``await`` natively.
     """
 
-    @staticmethod
-    def _run_in_thread(fn, *args):
+    def _run_in_thread(self, fn, *args):
         """Run a blocking function in a daemon thread, returning a KafkaFuture.
 
         The returned KafkaFuture is compatible with kafka-python's internal
         event loop, so ``await future`` properly yields control back to the
         NetworkSelector (keeping heartbeats alive) until the thread completes.
+
+        After the worker thread resolves the future, it wakes the
+        NetworkSelector so the suspended coroutine resumes immediately
+        rather than waiting for the next heartbeat / select timeout.
         """
         future = KafkaFuture()
+        # Capture the selector for cross-thread wakeup.  The selector's
+        # ``_poll_once`` registers ``call_soon(task)`` as the future callback,
+        # which only queues the task without waking the selector.  We call
+        # ``wakeup()`` explicitly so ``select()`` returns and processes the
+        # newly-ready task right away.
+        net = getattr(getattr(self.consumer_instance, "consumer", None), "_net", None)
 
         def _target():
             try:
@@ -655,6 +664,12 @@ class RebalanceListener(AsyncConsumerRebalanceListener):
                 future.success(result)
             except Exception as exc:
                 future.failure(exc)
+            finally:
+                if net is not None:
+                    try:
+                        net.wakeup()
+                    except Exception:
+                        pass
 
         thread = threading.Thread(target=_target, daemon=True)
         thread.start()
