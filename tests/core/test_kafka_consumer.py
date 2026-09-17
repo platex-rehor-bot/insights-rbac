@@ -1536,7 +1536,7 @@ class FencingTokenRebalanceTests(TestCase):
         # KafkaFuture, which __await__ handles without yielding.
         from kafka.future import Future as KafkaFuture
 
-        def _sync_run_in_thread(fn, *args):
+        def _sync_run_in_thread(self_listener, fn, *args):
             future = KafkaFuture()
             try:
                 result = fn(*args)
@@ -1545,7 +1545,7 @@ class FencingTokenRebalanceTests(TestCase):
                 future.failure(exc)
             return future
 
-        patcher = patch.object(RebalanceListener, "_run_in_thread", staticmethod(_sync_run_in_thread))
+        patcher = patch.object(RebalanceListener, "_run_in_thread", _sync_run_in_thread)
         patcher.start()
         self.addCleanup(patcher.stop)
 
