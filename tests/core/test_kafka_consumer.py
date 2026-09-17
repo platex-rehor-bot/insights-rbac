@@ -48,6 +48,7 @@ from core.kafka_consumer import (
     DebeziumMessage,
     MessageValidator,
     RBACKafkaConsumer,
+    RebalanceListener,
     ReplicationMessage,
     RetryConfig,
     _save_consistency_token_best_effort,
@@ -1527,6 +1528,27 @@ class FencingTokenRebalanceTests(TestCase):
 
         self.partition = TopicPartition("test-topic", 0)
 
+        # Patch _run_in_thread to run synchronously in tests.
+        # kafka-python uses its own event loop (not asyncio), so
+        # _run_in_thread uses kafka.future.Future + threading.Thread
+        # which is incompatible with asyncio.run(). This patch runs
+        # the function synchronously and returns a pre-resolved
+        # KafkaFuture, which __await__ handles without yielding.
+        from kafka.future import Future as KafkaFuture
+
+        def _sync_run_in_thread(fn, *args):
+            future = KafkaFuture()
+            try:
+                result = fn(*args)
+                future.success(result)
+            except Exception as exc:
+                future.failure(exc)
+            return future
+
+        patcher = patch.object(RebalanceListener, "_run_in_thread", staticmethod(_sync_run_in_thread))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     @patch("core.kafka_consumer.RBACKafkaConsumer._acquire_lock_with_retry")
     def test_partition_assignment_acquires_lock(self, mock_acquire_lock):
         """Test that partition assignment acquires lock token and resets failure flag."""
@@ -1682,7 +1704,7 @@ class FencingTokenRebalanceTests(TestCase):
 
         The RebalanceListener.on_partitions_revoked is an async method that
         dispatches blocking work (offset commit, lock clearing) to a worker
-        thread via asyncio.to_thread(). This test exercises that code path,
+        thread via kafka.future.Future. This test exercises that code path,
         mirroring the pattern used for on_partitions_assigned tests.
         """
         from core.kafka_consumer import RebalanceListener
