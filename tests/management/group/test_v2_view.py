@@ -890,6 +890,16 @@ class GroupV2AddPrincipalsViewTest(GroupV2ViewTestBase):
         added = self.mock_dual_write_view.return_value.replicate_new_principals.call_args.args[0]
         self.assertEqual(len(added), 1)
 
+    def test_add_many_duplicate_usernames_not_rejected(self):
+        """The batch-size limit applies to the deduplicated identifier count, not the raw request payload.
+
+        Matches the bulk-remove endpoint, which parses its comma-separated identifiers into a set before
+        enforcing MAX_BULK_PRINCIPALS.
+        """
+        response = self._add(self.group_b.uuid, {"usernames": ["user_3"] * 101})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
     def test_add_empty_body_rejected(self):
         """An empty body is rejected at the serializer layer."""
         for body in ({}, {"usernames": []}, {"usernames": [], "service_accounts": []}):

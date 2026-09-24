@@ -115,27 +115,41 @@ def _parse_csv_set(value: str) -> set:
     return {item.strip() for item in value.split(",") if item.strip()}
 
 
+def _validate_batch_size(values: set) -> set:
+    """Reject a deduplicated identifier set larger than MAX_BULK_PRINCIPALS.
+
+    Applied after deduplication (not on the raw request payload) so add and remove enforce the same
+    limit consistently -- e.g. the same identifier repeated over 100 times is one identifier, not a
+    violation.
+    """
+    if len(values) > MAX_BULK_PRINCIPALS:
+        raise serializers.ValidationError(f"A maximum of {MAX_BULK_PRINCIPALS} identifiers may be provided.")
+    return values
+
+
 class GroupV2AddPrincipalsInputSerializer(serializers.Serializer):
     """Input serializer for adding principals to a group. At least one field must contain items."""
 
     usernames = serializers.ListField(
         child=serializers.CharField(min_length=1),
         min_length=1,
-        max_length=MAX_BULK_PRINCIPALS,
         required=False,
-        help_text=f"Usernames to add. Maximum {MAX_BULK_PRINCIPALS} per request.",
+        help_text=f"Usernames to add. Maximum {MAX_BULK_PRINCIPALS} unique identifiers per request.",
     )
     service_accounts = serializers.ListField(
         child=serializers.CharField(min_length=1),
         min_length=1,
-        max_length=MAX_BULK_PRINCIPALS,
         required=False,
-        help_text=f"Service account client IDs to add. Maximum {MAX_BULK_PRINCIPALS} per request.",
+        help_text=f"Service account client IDs to add. Maximum {MAX_BULK_PRINCIPALS} unique identifiers per request.",
     )
 
     def validate_usernames(self, value):
-        """Normalize usernames to lower case, matching how they are stored on Principal."""
-        return [username.lower() for username in value]
+        """Normalize usernames to lower case, matching how they are stored on Principal, and deduplicate."""
+        return _validate_batch_size({username.lower() for username in value})
+
+    def validate_service_accounts(self, value):
+        """Deduplicate service account client IDs."""
+        return _validate_batch_size(set(value))
 
     def validate(self, data):
         """Require at least one of usernames or service_accounts to be present."""
@@ -230,18 +244,11 @@ class GroupV2RemovePrincipalsInputSerializer(serializers.Serializer):
 
     def validate_usernames(self, value):
         """Parse the comma-separated usernames, normalized to lower case."""
-        return self._validate_csv_size({username.lower() for username in _parse_csv_set(value)})
+        return _validate_batch_size({username.lower() for username in _parse_csv_set(value)})
 
     def validate_service_accounts(self, value):
         """Parse the comma-separated service account client IDs."""
-        return self._validate_csv_size(_parse_csv_set(value))
-
-    @staticmethod
-    def _validate_csv_size(values: set) -> set:
-        """Reject a parsed CSV set larger than MAX_BULK_PRINCIPALS."""
-        if len(values) > MAX_BULK_PRINCIPALS:
-            raise serializers.ValidationError(f"A maximum of {MAX_BULK_PRINCIPALS} identifiers may be provided.")
-        return values
+        return _validate_batch_size(_parse_csv_set(value))
 
     def validate(self, data):
         """Require at least one of usernames or service_accounts to be present."""
