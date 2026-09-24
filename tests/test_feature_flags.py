@@ -21,7 +21,9 @@ import time
 from unittest.mock import MagicMock, patch
 
 from django.conf import settings
-from django.test import SimpleTestCase, TestCase, override_settings
+from django.test import TestCase, override_settings
+
+from tests.identity_request import IdentityRequest
 
 from feature_flags import FEATURE_FLAGS, FeatureFlags, rbac_unleash_fetch_total, rbac_unleash_last_fetch_timestamp
 
@@ -169,7 +171,7 @@ class FeatureFlagsTest(TestCase):
         self.assertEqual(call_kwargs["request_timeout"], 30)
 
 
-class OCMV2FeatureFlagsTest(SimpleTestCase):
+class OCMV2FeatureFlagsTest(IdentityRequest):
     """Exercise the independent OCM rollout without external services."""
 
     def test_target_org_and_unleash_result(self):
