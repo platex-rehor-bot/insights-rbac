@@ -479,6 +479,7 @@ class IntegrationViewsTests(IdentityRequest):
         expected_org_ids = [t.org_id for t in [self.modifiedTenant1, self.modifiedTenant2]]
         actual_org_ids = [t["org_id"] for t in response.data.get("data")]
         self.assertEqual(sorted(expected_org_ids), sorted(actual_org_ids))
+        mock_flag.assert_called_once_with()
 
     @patch("internal.integration.views.FEATURE_FLAGS.is_ocm_v2_enabled_global", return_value=True)
     def test_tenants_modified_v2_flag_enabled(self, mock_flag):
@@ -493,6 +494,7 @@ class IntegrationViewsTests(IdentityRequest):
         expected_org_ids = [t.org_id for t in [self.modifiedTenant1, self.modifiedTenant2]]
         actual_org_ids = [t["org_id"] for t in response.data.get("data")]
         self.assertEqual(sorted(expected_org_ids), sorted(actual_org_ids))
+        mock_flag.assert_called_once_with()
 
     @patch("internal.integration.views.FEATURE_FLAGS.is_ocm_v2_enabled_global", return_value=False)
     def test_tenants_modified_v1_only_role_detected(self, mock_flag):

@@ -189,7 +189,7 @@ class OCMV2FeatureFlagsTest(IdentityRequest):
     def test_unavailable_client_fallback_is_independent(self):
         """Workspace activation settings do not control OCM's fallback."""
         flags = FeatureFlags()
-        with patch.object(flags, "initialize"):
+        with patch.object(flags, "initialize") as mock_initialize:
             for enabled in (True, False):
                 with (
                     self.subTest(enabled=enabled),
@@ -198,6 +198,7 @@ class OCMV2FeatureFlagsTest(IdentityRequest):
                     ),
                 ):
                     self.assertIs(flags.is_ocm_v2_enabled("12345"), enabled)
+            self.assertEqual(mock_initialize.call_count, 2)
 
     @override_settings(OCM_V2_ENABLED=False, V2_EDIT_API_ENABLED=True)
     def test_missing_flag_defaults_off(self):
@@ -222,8 +223,9 @@ class OCMV2FeatureFlagsTest(IdentityRequest):
     def test_global_fallback_uses_env(self):
         """is_ocm_v2_enabled_global falls back to OCM_V2_ENABLED when client unavailable."""
         flags = FeatureFlags()
-        with patch.object(flags, "initialize"):
+        with patch.object(flags, "initialize") as mock_initialize:
             self.assertTrue(flags.is_ocm_v2_enabled_global())
+            mock_initialize.assert_called_once_with()
 
     def test_on_unleash_event_tracks_fetched(self):
         """Test that _on_unleash_event increments poll counter on FETCHED events."""
