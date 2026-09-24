@@ -746,6 +746,29 @@ class GroupV2ListPrincipalsViewTest(GroupV2ViewTestBase):
 
         self.assertEqual(self._usernames(response), ["service-account-abc"])
 
+    def test_list_filter_by_service_account_name_and_description_are_ored(self):
+        """service_account_name and service_account_description are independent OR-ed criteria, not ANDed.
+
+        Each filter degrades to matching on username; supplying both together must not require a single
+        username to contain both substrings simultaneously.
+        """
+        other_sa = Principal.objects.create(
+            username="service-account-other",
+            service_account_id="other",
+            type=Principal.Types.SERVICE_ACCOUNT,
+            tenant=self.tenant,
+        )
+        self.group_a.principals.add(other_sa)
+
+        response = self._list_principals(
+            self.group_a.uuid,
+            principal_type="all",
+            service_account_name="abc",
+            service_account_description="other",
+        )
+
+        self.assertCountEqual(self._usernames(response), ["service-account-abc", "service-account-other"])
+
     def test_list_service_account_name_ignored_when_principal_type_defaults_to_user(self):
         """service_account_name is a documented no-op when principal_type defaults to 'user', not a zeroing filter."""
         response = self._list_principals(self.group_a.uuid, service_account_name="anything")

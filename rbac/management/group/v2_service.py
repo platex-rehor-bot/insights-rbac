@@ -33,7 +33,7 @@ from management.group.v2_exceptions import (
 from management.principal.model import Principal
 from management.relation_replicator.relation_replicator import ReplicationEventType
 from management.role.model import Role
-from management.v2_filters import v2_name_filter
+from management.v2_filters import v2_name_filter, v2_name_query
 
 from api.models import Tenant
 
@@ -176,13 +176,23 @@ class GroupV2Service:
         if principal_type != Principal.Types.USER:
             # service_account_name/service_account_description have no local column to filter on (no display_name
             # or description stored for service accounts); degrade to matching on username, scoped to service
-            # accounts only so these filters never match regular user principals.
-            for field in ("service_account_name", "service_account_description"):
-                value = params.get(field)
-                if value:
-                    queryset = v2_name_filter(
-                        queryset.filter(type=Principal.Types.SERVICE_ACCOUNT), value, field="username"
-                    )
+            # accounts only so these filters never match regular user principals. The two filters are independent
+            # search criteria (per the TypeSpec contract), so they are OR-ed together rather than chained, which
+            # would otherwise require a single username to match both substrings simultaneously.
+            sa_values = [params.get(field) for field in ("service_account_name", "service_account_description")]
+            sa_values = [value for value in sa_values if value]
+            if sa_values:
+                queryset = queryset.filter(type=Principal.Types.SERVICE_ACCOUNT)
+                combined_query = None
+                for value in sa_values:
+                    query = v2_name_query(value, field="username")
+                    if query is None:
+                        # A bare '*' already matches everything; no further filtering is needed.
+                        combined_query = None
+                        break
+                    combined_query = query if combined_query is None else combined_query | query
+                if combined_query is not None:
+                    queryset = queryset.filter(combined_query)
 
         # username_only and admin_only are accepted (see GroupV2ListPrincipalsInputSerializer help_text) but
         # intentionally not read here: this endpoint never enriches from external identity services, so
