@@ -182,6 +182,7 @@ Env vars: `READ_YOUR_WRITES_WORKSPACE_ENABLED`, `READ_YOUR_WRITES_CHANNEL`, `REA
 | Flag | Default | Effect |
 |------|---------|--------|
 | `V2_APIS_ENABLED` | `False` | Registers v2 URL routes |
+| `OCM_V2_ENABLED` | `False` | Fallback setting for V2-backed OCM integration reads |
 | `KAFKA_ENABLED` | `False` | Enables Kafka producer/consumer |
 | `NOTIFICATIONS_ENABLED` | `False` | Enables custom resource notifications |
 | `NOTIFICATIONS_RH_ENABLED` | `False` | Enables RH system notifications |
@@ -193,6 +194,24 @@ Env vars: `READ_YOUR_WRITES_WORKSPACE_ENABLED`, `READ_YOUR_WRITES_CHANNEL`, `REA
 | `KAFKA_PRINCIPAL_CLEANUP_DRAIN_TIMEOUT_MS` | `50000` | Wall-clock budget (ms) per Kafka cleanup cycle |
 | `KAFKA_PRINCIPAL_CLEANUP_BOP_BATCH_SIZE` | `100` | Max Kafka messages per BOP lookup (user_ids deduped within each batch; each message still applies DB) |
 | `READ_YOUR_WRITES_WORKSPACE_ENABLED` | `False` | Enables workspace create blocking |
+
+### Modified-tenants and OCM V2
+
+The Unleash flag `rbac.ocm-v2.enabled` controls whether the modified-tenants endpoint
+(`/_private/api/v1/integrations/tenant/?modified_only=true`) detects tenant modification
+through V1 roles (`Role.system=False`) or V2 roles (`RoleV2.type=custom`). Non-system
+group detection is unchanged regardless of flag state.
+
+Because the modified-tenants endpoint returns tenants across all organizations, the flag
+is evaluated **without an org context** — the Unleash default strategy result is used,
+with `OCM_V2_ENABLED` as the environment fallback. This is intentional: per-org evaluation
+is not feasible for an endpoint that lists all orgs, and the global toggle ensures the
+modified-tenants detection switches consistently with the roles-for-group endpoint (#3421).
+
+During rollout:
+- `OCM_V2_ENABLED=False` (default): tenants are detected via V1 non-system roles.
+- `OCM_V2_ENABLED=True`: tenants are detected via V2 custom roles.
+- Non-system groups always contribute to detection in both modes.
 
 ## 12. Prometheus Metrics Conventions
 
