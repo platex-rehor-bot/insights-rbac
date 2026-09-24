@@ -66,9 +66,6 @@ class GroupV2ViewTestBase(IdentityRequest):
         )
         self.mock_check_access = self.enterContext(patch(ACCESS_CHECK_TARGET, return_value=True))
         self.mock_dual_write = self.enterContext(patch("management.group.v2_service.RelationApiDualWriteGroupHandler"))
-        self.mock_dual_write_view = self.enterContext(
-            patch("management.group.v2_view.RelationApiDualWriteGroupHandler")
-        )
 
         self.user_1 = Principal.objects.create(username="user_1", tenant=self.tenant)
         self.user_2 = Principal.objects.create(username="user_2", tenant=self.tenant)
@@ -859,9 +856,9 @@ class GroupV2AddPrincipalsViewTest(GroupV2ViewTestBase):
         self.assertEqual(data["principal_count"], 2)
         self.assertTrue(self.group_b.principals.filter(pk=self.user_3.pk).exists())
 
-        self.mock_dual_write_view.assert_called_once()
-        self.assertEqual(self.mock_dual_write_view.call_args.args[1], ReplicationEventType.ADD_PRINCIPALS_TO_GROUP)
-        added = self.mock_dual_write_view.return_value.replicate_new_principals.call_args.args[0]
+        self.mock_dual_write.assert_called_once()
+        self.assertEqual(self.mock_dual_write.call_args.args[1], ReplicationEventType.ADD_PRINCIPALS_TO_GROUP)
+        added = self.mock_dual_write.return_value.replicate_new_principals.call_args.args[0]
         self.assertEqual(added, [self.user_3])
 
         log = AuditLog.objects.get(resource_type=AuditLog.GROUP_V2, action=AuditLog.ADD)
@@ -887,7 +884,7 @@ class GroupV2AddPrincipalsViewTest(GroupV2ViewTestBase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.json()["principal_count"], 2)
-        added = self.mock_dual_write_view.return_value.replicate_new_principals.call_args.args[0]
+        added = self.mock_dual_write.return_value.replicate_new_principals.call_args.args[0]
         self.assertEqual(len(added), 1)
 
     def test_add_many_duplicate_usernames_not_rejected(self):
@@ -899,6 +896,24 @@ class GroupV2AddPrincipalsViewTest(GroupV2ViewTestBase):
         response = self._add(self.group_b.uuid, {"usernames": ["user_3"] * 101})
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_add_already_member_is_a_no_op(self):
+        """Re-adding an existing member resolves successfully but replicates and audit-logs nothing."""
+        response = self._add(self.group_a.uuid, {"usernames": ["user_1"]})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.json()["principal_count"], 2)
+        self.mock_dual_write.assert_not_called()
+        self.assertFalse(AuditLog.objects.filter(resource_type=AuditLog.GROUP_V2, action=AuditLog.ADD).exists())
+
+    def test_add_mixed_new_and_existing_member_replicates_only_new(self):
+        """When some identifiers are already members, only the newly added ones are replicated/audit-logged."""
+        response = self._add(self.group_a.uuid, {"usernames": ["user_1", "user_3"]})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        added = self.mock_dual_write.return_value.replicate_new_principals.call_args.args[0]
+        self.assertEqual(added, [self.user_3])
+        self.assertEqual(AuditLog.objects.filter(resource_type=AuditLog.GROUP_V2, action=AuditLog.ADD).count(), 1)
 
     def test_add_empty_body_rejected(self):
         """An empty body is rejected at the serializer layer."""
@@ -919,7 +934,7 @@ class GroupV2AddPrincipalsViewTest(GroupV2ViewTestBase):
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
         self.assertFalse(self.group_b.principals.filter(pk=self.user_3.pk).exists())
-        self.mock_dual_write_view.return_value.replicate_new_principals.assert_not_called()
+        self.mock_dual_write.return_value.replicate_new_principals.assert_not_called()
 
     def test_add_system_group_rejected(self):
         """System groups cannot have principals added."""
@@ -929,7 +944,7 @@ class GroupV2AddPrincipalsViewTest(GroupV2ViewTestBase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.json()["detail"], "Groups with system=true may not be modified.")
-        self.mock_dual_write_view.return_value.replicate_new_principals.assert_not_called()
+        self.mock_dual_write.return_value.replicate_new_principals.assert_not_called()
 
     def test_add_platform_and_admin_default_groups_allowed(self):
         """platform_default and admin_default groups allow adding members."""
@@ -968,7 +983,7 @@ class GroupV2AddPrincipalsViewTest(GroupV2ViewTestBase):
 
     def test_add_replication_failure_rolls_back_membership(self):
         """A replication failure inside atomic_block() rolls back the M2M membership change."""
-        self.mock_dual_write_view.return_value.replicate_new_principals.side_effect = Exception("replication failed")
+        self.mock_dual_write.return_value.replicate_new_principals.side_effect = Exception("replication failed")
         self.client.raise_request_exception = False
 
         response = self._add(self.group_b.uuid, {"usernames": ["user_3"]})
@@ -993,11 +1008,9 @@ class GroupV2RemovePrincipalsBulkViewTest(GroupV2ViewTestBase):
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(self.group_a.principals.filter(pk=self.user_1.pk).exists())
 
-        self.mock_dual_write_view.assert_called_once()
-        self.assertEqual(
-            self.mock_dual_write_view.call_args.args[1], ReplicationEventType.REMOVE_PRINCIPALS_FROM_GROUP
-        )
-        removed = self.mock_dual_write_view.return_value.replicate_removed_principals.call_args.args[0]
+        self.mock_dual_write.assert_called_once()
+        self.assertEqual(self.mock_dual_write.call_args.args[1], ReplicationEventType.REMOVE_PRINCIPALS_FROM_GROUP)
+        removed = self.mock_dual_write.return_value.replicate_removed_principals.call_args.args[0]
         self.assertEqual(removed, [self.user_1])
 
         log = AuditLog.objects.get(resource_type=AuditLog.GROUP_V2, action=AuditLog.REMOVE)
@@ -1030,7 +1043,7 @@ class GroupV2RemovePrincipalsBulkViewTest(GroupV2ViewTestBase):
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
         self.assertCountEqual(self.group_a.principals.all(), [self.user_1, self.user_2, self.service_account])
-        self.mock_dual_write_view.return_value.replicate_removed_principals.assert_not_called()
+        self.mock_dual_write.return_value.replicate_removed_principals.assert_not_called()
 
     def test_remove_non_member_principal_not_found(self):
         """A principal that exists tenant-wide but is not a member of this group returns 404."""
@@ -1044,14 +1057,12 @@ class GroupV2RemovePrincipalsBulkViewTest(GroupV2ViewTestBase):
 
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(self.group_a.principals.filter(pk=self.user_1.pk).exists())
-        removed = self.mock_dual_write_view.return_value.replicate_removed_principals.call_args.args[0]
+        removed = self.mock_dual_write.return_value.replicate_removed_principals.call_args.args[0]
         self.assertEqual(len(removed), 1)
 
     def test_remove_replication_failure_rolls_back_membership(self):
         """A replication failure inside atomic_block() rolls back the M2M membership change."""
-        self.mock_dual_write_view.return_value.replicate_removed_principals.side_effect = Exception(
-            "replication failed"
-        )
+        self.mock_dual_write.return_value.replicate_removed_principals.side_effect = Exception("replication failed")
         self.client.raise_request_exception = False
 
         response = self._remove(self.group_a.uuid, usernames="user_1")
@@ -1097,11 +1108,9 @@ class GroupV2RemovePrincipalViewTest(GroupV2ViewTestBase):
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(self.group_a.principals.filter(pk=self.user_1.pk).exists())
 
-        self.mock_dual_write_view.assert_called_once()
-        self.assertEqual(
-            self.mock_dual_write_view.call_args.args[1], ReplicationEventType.REMOVE_PRINCIPALS_FROM_GROUP
-        )
-        removed = self.mock_dual_write_view.return_value.replicate_removed_principals.call_args.args[0]
+        self.mock_dual_write.assert_called_once()
+        self.assertEqual(self.mock_dual_write.call_args.args[1], ReplicationEventType.REMOVE_PRINCIPALS_FROM_GROUP)
+        removed = self.mock_dual_write.return_value.replicate_removed_principals.call_args.args[0]
         self.assertEqual(removed, [self.user_1])
 
         log = AuditLog.objects.get(resource_type=AuditLog.GROUP_V2, action=AuditLog.REMOVE)
@@ -1147,9 +1156,7 @@ class GroupV2RemovePrincipalViewTest(GroupV2ViewTestBase):
 
     def test_remove_principal_replication_failure_rolls_back_membership(self):
         """A replication failure inside atomic_block() rolls back the M2M membership change."""
-        self.mock_dual_write_view.return_value.replicate_removed_principals.side_effect = Exception(
-            "replication failed"
-        )
+        self.mock_dual_write.return_value.replicate_removed_principals.side_effect = Exception("replication failed")
         self.client.raise_request_exception = False
 
         response = self._remove(self.group_a.uuid, self.user_1.uuid)

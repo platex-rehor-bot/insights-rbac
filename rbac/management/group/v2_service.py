@@ -202,12 +202,24 @@ class GroupV2Service:
         return queryset.order_by(order_by, "uuid")
 
     def add_principals(self, group: Group, usernames: set, service_account_client_ids: set) -> List[Principal]:
-        """Add principals to a group, resolved from RBAC's local Principal table only."""
+        """Add principals to a group, resolved from RBAC's local Principal table only.
+
+        Identifiers that resolve to already-existing members are silently skipped -- only newly added
+        principals are replicated and returned, so re-adding an existing member is a no-op rather than
+        producing duplicate dual-write replication and audit trail entries.
+        """
         self._check_not_protected(group, self.PROTECTED_FLAGS_FOR_UPDATE, "modified")
 
         principals = self._resolve_principals(usernames, service_account_client_ids)
-        group.principals.add(*principals)
-        return principals
+        existing_ids = set(group.principals.values_list("pk", flat=True))
+        new_principals = [p for p in principals if p.pk not in existing_ids]
+
+        if new_principals:
+            group.principals.add(*new_principals)
+            dual_write_handler = RelationApiDualWriteGroupHandler(group, ReplicationEventType.ADD_PRINCIPALS_TO_GROUP)
+            dual_write_handler.replicate_new_principals(new_principals)
+
+        return new_principals
 
     def remove_principals(self, group: Group, usernames: set, service_account_client_ids: set) -> List[Principal]:
         """Remove principals from a group. All identifiers must currently be members, or nothing is removed."""
@@ -215,6 +227,10 @@ class GroupV2Service:
 
         principals = self._resolve_member_principals(group, usernames, service_account_client_ids)
         group.principals.remove(*principals)
+
+        dual_write_handler = RelationApiDualWriteGroupHandler(group, ReplicationEventType.REMOVE_PRINCIPALS_FROM_GROUP)
+        dual_write_handler.replicate_removed_principals(principals)
+
         return principals
 
     def remove_principal(self, group: Group, principal_uuid) -> Principal:
@@ -231,6 +247,10 @@ class GroupV2Service:
             raise PrincipalNotFoundError([str(principal_uuid)])
 
         group.principals.remove(principal)
+
+        dual_write_handler = RelationApiDualWriteGroupHandler(group, ReplicationEventType.REMOVE_PRINCIPALS_FROM_GROUP)
+        dual_write_handler.replicate_removed_principals([principal])
+
         return principal
 
     def _resolve_principals(self, usernames: set, service_account_client_ids: set) -> List[Principal]:

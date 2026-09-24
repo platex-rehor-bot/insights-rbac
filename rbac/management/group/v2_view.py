@@ -23,7 +23,6 @@ from django.db import transaction
 from management.atomic_transactions import atomic_block
 from management.audit_log.model import AuditLog
 from management.base_viewsets import BaseV2ViewSet
-from management.group.relation_api_dual_write_group_handler import RelationApiDualWriteGroupHandler
 from management.group.v2_exceptions import (
     GroupAlreadyExistsError,
     GroupHasRoleBindingsError,
@@ -43,7 +42,6 @@ from management.notifications.notification_handlers import group_obj_change_noti
 from management.permissions.group_v2_access import GroupV2KesselAccessPermission
 from management.permissions.v2_edit_api_access import V2WriteRequiresWorkspacesEnabled
 from management.principal.v2_serializer import PrincipalV2OutputSerializer
-from management.relation_replicator.relation_replicator import ReplicationEventType
 from management.utils import v2response_error_from_errors
 from management.v2_mixins import AtomicOperationsMixin
 from rest_framework import status
@@ -209,10 +207,9 @@ class GroupV2ViewSet(AtomicOperationsMixin, BaseV2ViewSet):
             usernames = set(serializer.validated_data.get("usernames") or [])
             service_accounts = set(serializer.validated_data.get("service_accounts") or [])
 
+            # Only principals whose membership actually changed are returned (already-member
+            # identifiers resolve successfully but are excluded), so this only audit-logs new additions.
             principals = service.add_principals(group, usernames, service_accounts)
-
-            dual_write_handler = RelationApiDualWriteGroupHandler(group, ReplicationEventType.ADD_PRINCIPALS_TO_GROUP)
-            dual_write_handler.replicate_new_principals(principals)
 
             for principal in principals:
                 audit_log = AuditLog()
@@ -233,11 +230,6 @@ class GroupV2ViewSet(AtomicOperationsMixin, BaseV2ViewSet):
 
             principals = service.remove_principals(group, usernames, service_accounts)
 
-            dual_write_handler = RelationApiDualWriteGroupHandler(
-                group, ReplicationEventType.REMOVE_PRINCIPALS_FROM_GROUP
-            )
-            dual_write_handler.replicate_removed_principals(principals)
-
             for principal in principals:
                 audit_log = AuditLog()
                 audit_log.log_group_remove(request, AuditLog.GROUP_V2, group, principal, principal.type)
@@ -251,11 +243,6 @@ class GroupV2ViewSet(AtomicOperationsMixin, BaseV2ViewSet):
         with atomic_block():
             group = self.get_object()
             principal = service.remove_principal(group, principal_uuid)
-
-            dual_write_handler = RelationApiDualWriteGroupHandler(
-                group, ReplicationEventType.REMOVE_PRINCIPALS_FROM_GROUP
-            )
-            dual_write_handler.replicate_removed_principals([principal])
 
             audit_log = AuditLog()
             audit_log.log_group_remove(request, AuditLog.GROUP_V2, group, principal, principal.type)
