@@ -179,8 +179,9 @@ class GroupV2Service:
             # accounts only so these filters never match regular user principals. The two filters are independent
             # search criteria (per the TypeSpec contract), so they are OR-ed together rather than chained, which
             # would otherwise require a single username to match both substrings simultaneously.
-            sa_values = [params.get(field) for field in ("service_account_name", "service_account_description")]
-            sa_values = [value for value in sa_values if value]
+            sa_values: list[str] = [
+                params[field] for field in ("service_account_name", "service_account_description") if params.get(field)
+            ]
             if sa_values:
                 queryset = queryset.filter(type=Principal.Types.SERVICE_ACCOUNT)
                 combined_query = None
