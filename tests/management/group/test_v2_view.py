@@ -843,6 +843,36 @@ class GroupV2AddPrincipalsViewTest(GroupV2ViewTestBase):
             tenant=self.tenant,
         )
 
+        # Mock BOP proxy: return data for usernames that exist as user-type Principals in this
+        # tenant's local DB, simulating BOP validating org membership.
+        def _mock_bop(usernames, org_id=None, limit=None, offset=None, options=None):
+            found = Principal.objects.filter(
+                username__in=[u.lower() if isinstance(u, str) else u for u in usernames],
+                tenant=self.tenant,
+                type=Principal.Types.USER,
+            )
+            return {
+                "status_code": 200,
+                "data": [
+                    {
+                        "username": p.username,
+                        "user_id": str(p.user_id) if p.user_id else f"uid-{p.username}",
+                        "org_id": org_id or self.tenant.org_id,
+                        "is_active": True,
+                        "is_org_admin": False,
+                    }
+                    for p in found
+                ],
+            }
+
+        self.mock_proxy = self.enterContext(
+            patch(
+                "management.principal.proxy.PrincipalProxy.request_filtered_principals",
+                side_effect=_mock_bop,
+            )
+        )
+        self.mock_backfill = self.enterContext(patch("management.group.v2_view.backfill_remote_principals"))
+
     def _add(self, group_uuid, body):
         return self.client.post(self._principals_url(group_uuid), body, format="json", **self.headers)
 
@@ -990,6 +1020,37 @@ class GroupV2AddPrincipalsViewTest(GroupV2ViewTestBase):
 
         self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
         self.assertFalse(self.group_b.principals.filter(pk=self.user_3.pk).exists())
+
+    def test_add_validates_usernames_via_bop(self):
+        """User principals are validated against BOP before being added to the group."""
+        response = self._add(self.group_b.uuid, {"usernames": ["user_3"]})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.mock_proxy.assert_called_once()
+        call_args = self.mock_proxy.call_args
+        self.assertEqual(sorted(call_args.args[0]), ["user_3"])
+        self.mock_backfill.assert_called_once()
+
+    def test_add_bop_proxy_error_returns_error(self):
+        """A BOP proxy error is surfaced as an error response without modifying group membership."""
+        self.mock_proxy.side_effect = None
+        self.mock_proxy.return_value = {
+            "status_code": 502,
+            "errors": [{"detail": "BOP unavailable", "status": "502", "source": "principals"}],
+        }
+
+        response = self._add(self.group_b.uuid, {"usernames": ["user_3"]})
+
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+        self.assertFalse(self.group_b.principals.filter(pk=self.user_3.pk).exists())
+
+    def test_add_bop_skipped_for_service_account_only_request(self):
+        """BOP validation is only for user principals; service-account-only requests skip it."""
+        response = self._add(self.group_b.uuid, {"service_accounts": ["xyz"]})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.mock_proxy.assert_not_called()
+        self.mock_backfill.assert_not_called()
 
 
 class GroupV2RemovePrincipalsBulkViewTest(GroupV2ViewTestBase):

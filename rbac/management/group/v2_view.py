@@ -41,7 +41,11 @@ from management.group.v2_service import GroupV2Service
 from management.notifications.notification_handlers import group_obj_change_notification_handler
 from management.permissions.group_v2_access import GroupV2KesselAccessPermission
 from management.permissions.v2_edit_api_access import V2WriteRequiresWorkspacesEnabled
+from management.principal.backfill import backfill_remote_principals
+from management.principal.proxy import PrincipalProxy, external_principal_to_user
 from management.principal.v2_serializer import PrincipalV2OutputSerializer
+from management.relation_replicator.outbox_replicator import OutboxReplicator
+from management.tenant_service import get_tenant_bootstrap_service
 from management.utils import v2response_error_from_errors
 from management.v2_mixins import AtomicOperationsMixin
 from rest_framework import status
@@ -173,7 +177,7 @@ class GroupV2ViewSet(AtomicOperationsMixin, BaseV2ViewSet):
         if request.method == "GET":
             return self._list_principals(request, uuid)
         if request.method == "POST":
-            return self._atomic_action(self._perform_add_principals, "add_principals", request, uuid=uuid)
+            return self._add_principals_to_group(request, uuid)
         return self._atomic_action(self._perform_remove_principals_bulk, "remove_principals_bulk", request, uuid=uuid)
 
     @action(detail=True, methods=["delete"], url_path=r"principals/(?P<principal_uuid>[0-9a-f-]+)")
@@ -196,20 +200,83 @@ class GroupV2ViewSet(AtomicOperationsMixin, BaseV2ViewSet):
         serializer = PrincipalV2OutputSerializer(page, many=True)
         return self.get_paginated_response(serializer.data)
 
+    def _add_principals_to_group(self, request, uuid=None):
+        """Add principals to a group, validating user principals via BOP before persisting.
+
+        Follows the V1 parity pattern: validate user principals against the BOP proxy *outside*
+        the SERIALIZABLE transaction (to avoid holding open a long transaction during the external
+        call), backfill any missing local Principal records, and then persist the group membership
+        change inside the retryable atomic block.
+        """
+        serializer = GroupV2AddPrincipalsInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        usernames = set(serializer.validated_data.get("usernames") or [])
+        service_account_client_ids = set(serializer.validated_data.get("service_accounts") or [])
+
+        # Validate user principals against BOP before opening the DB transaction (V1 parity).
+        if usernames:
+            error_response = self._validate_and_backfill_users(request, usernames)
+            if error_response is not None:
+                return error_response
+
+        return self._atomic_action(
+            self._perform_add_principals,
+            "add_principals",
+            request,
+            uuid=uuid,
+            usernames=usernames,
+            service_account_client_ids=service_account_client_ids,
+        )
+
+    def _validate_and_backfill_users(self, request, usernames):
+        """Validate usernames against BOP and backfill local Principal records.
+
+        Returns an error Response if validation fails, or None on success.
+        """
+        proxy = PrincipalProxy()
+        proxy_response = proxy.request_filtered_principals(
+            list(usernames),
+            org_id=request.user.org_id,
+            limit=len(usernames),
+            options={"return_id": True},
+        )
+        if isinstance(proxy_response, dict) and "errors" in proxy_response:
+            detail = proxy_response["errors"][0].get("detail", "Principal proxy validation failed")
+            return self._error_response(
+                Exception(detail),
+                proxy_response.get("status_code", status.HTTP_502_BAD_GATEWAY),
+            )
+
+        bop_data = proxy_response.get("data", [])
+        found_usernames = {u["username"].lower() for u in bop_data}
+        missing = usernames - found_usernames
+        if missing:
+            return self._error_response(
+                PrincipalNotFoundError(sorted(missing)),
+                status.HTTP_404_NOT_FOUND,
+            )
+
+        # Backfill: ensure all BOP-validated users have local Principal records.
+        users = [external_principal_to_user(item) for item in bop_data]
+        bootstrap_service = get_tenant_bootstrap_service(OutboxReplicator())
+        backfill_remote_principals(bootstrap_service, users, request.tenant)
+
+        return None
+
     @_catch_principal_errors
-    def _perform_add_principals(self, request, uuid=None):
-        """Add principals to a group and return the full group representation."""
+    def _perform_add_principals(self, request, uuid=None, usernames=None, service_account_client_ids=None):
+        """Persist pre-validated principals into a group inside an atomic transaction."""
         service = GroupV2Service(tenant=request.tenant)
         with atomic_block():
             group = self.get_object()
-            serializer = GroupV2AddPrincipalsInputSerializer(data=request.data)
-            serializer.is_valid(raise_exception=True)
-            usernames = set(serializer.validated_data.get("usernames") or [])
-            service_accounts = set(serializer.validated_data.get("service_accounts") or [])
 
             # Only principals whose membership actually changed are returned (already-member
             # identifiers resolve successfully but are excluded), so this only audit-logs new additions.
-            principals = service.add_principals(group, usernames, service_accounts)
+            principals = service.add_principals(
+                group,
+                usernames if usernames is not None else set(),
+                service_account_client_ids if service_account_client_ids is not None else set(),
+            )
 
             for principal in principals:
                 audit_log = AuditLog()
