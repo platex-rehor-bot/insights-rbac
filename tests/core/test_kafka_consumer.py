@@ -713,8 +713,8 @@ class RBACKafkaConsumerTests(TestCase):
 
     @patch("core.kafka_consumer.logger")
     @patch("core.kafka_consumer.json_format.ParseDict")
-    @patch("core.kafka_consumer.relations_api_replication.write_relationships")
-    @patch("core.kafka_consumer.relations_api_replication.delete_relationships")
+    @patch("core.kafka_consumer.inventory_api_replication.write_relationships")
+    @patch("core.kafka_consumer.inventory_api_replication.delete_relationships")
     @patch("core.kafka_consumer._save_consistency_token_best_effort")
     def test_system_role_without_tenant_id_does_not_warn(
         self, mock_save_token, mock_delete, mock_write, mock_parse_dict, mock_logger
@@ -771,8 +771,8 @@ class RBACKafkaConsumerTests(TestCase):
 
     @patch("core.kafka_consumer.logger")
     @patch("core.kafka_consumer.json_format.ParseDict")
-    @patch("core.kafka_consumer.relations_api_replication.write_relationships")
-    @patch("core.kafka_consumer.relations_api_replication.delete_relationships")
+    @patch("core.kafka_consumer.inventory_api_replication.write_relationships")
+    @patch("core.kafka_consumer.inventory_api_replication.delete_relationships")
     @patch("core.kafka_consumer._save_consistency_token_best_effort")
     def test_non_system_role_without_org_id_still_warns(
         self, mock_save_token, mock_delete, mock_write, mock_parse_dict, mock_logger
