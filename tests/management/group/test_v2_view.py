@@ -850,7 +850,7 @@ class GroupV2PublicDefaultGroupsViewTest(GroupV2ViewTestBase):
 
     def test_write_actions_on_public_default_group_not_found(self):
         """Update, delete and every principals action return 404 for public default groups and change nothing."""
-        self.enterContext(
+        mock_proxy = self.enterContext(
             patch(
                 "management.principal.proxy.PrincipalProxy.request_filtered_principals",
                 return_value={
@@ -859,7 +859,7 @@ class GroupV2PublicDefaultGroupsViewTest(GroupV2ViewTestBase):
                 },
             )
         )
-        self.enterContext(patch("management.group.v2_view.backfill_remote_principals"))
+        mock_backfill = self.enterContext(patch("management.group.v2_view.backfill_remote_principals"))
 
         for group in (self.public_platform_default, self.public_admin_default):
             original_name = group.name
@@ -889,6 +889,11 @@ class GroupV2PublicDefaultGroupsViewTest(GroupV2ViewTestBase):
 
         self.mock_dual_write.assert_not_called()
         self.assertFalse(AuditLog.objects.filter(resource_type=AuditLog.GROUP_V2).exists())
+
+        # The add-principals pre-check must short-circuit before any external validation or backfill
+        # calls, so a rejected public-group write creates no Principal record as a side effect.
+        mock_proxy.assert_not_called()
+        mock_backfill.assert_not_called()
 
 
 class GroupV2CreateViewTest(GroupV2ViewTestBase):

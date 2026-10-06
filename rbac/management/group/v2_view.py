@@ -22,6 +22,7 @@ from functools import wraps
 import requests
 from django.conf import settings
 from django.db import transaction
+from django.http import Http404
 from management.atomic_transactions import atomic_block
 from management.audit_log.model import AuditLog
 from management.authorization.scope_claims import ScopeClaims
@@ -238,6 +239,13 @@ class GroupV2ViewSet(AtomicOperationsMixin, BaseV2ViewSet):
         during the external calls), backfill any missing local Principal records, and then persist the
         group membership change inside the retryable atomic block.
         """
+        # Pre-check: verify the group exists in this tenant's writable queryset before making external
+        # validation calls that create Principal records as a side effect. Without this guard, a request
+        # targeting a public-tenant default group would backfill new Principal rows even though the
+        # subsequent get_object() inside the transaction would reject the group with a 404.
+        if not self.get_queryset().filter(uuid=uuid).exists():
+            raise Http404
+
         serializer = GroupV2AddPrincipalsInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         usernames = set(serializer.validated_data.get("usernames") or [])
