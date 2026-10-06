@@ -3332,7 +3332,7 @@ def kessel_parity_check(request):
 
 
 def bootstrap_users_from_user_ids(request):
-    """Bootstrap users by looking up user IDs in BOP and creating users/tenants.
+    """Bootstrap users by looking up user IDs in BOP and creating/merging principals.
 
     POST /_private/api/utils/bootstrap_users_from_user_ids/?dry_run=true
 
@@ -3344,8 +3344,18 @@ def bootstrap_users_from_user_ids(request):
 
     For each user ID:
     1. Queries BOP to get user details (username, org_id, is_active, is_org_admin)
-    2. Skips users that are not active
-    3. Creates the user and bootstraps their tenant using the same flow as replicated events
+    2. Skips users not found in BOP or not active (status ``skipped``)
+    3. Detects stale principals: if a tenant already has a principal with the
+       same ``user_id`` but a different username (i.e. the user's BOP username
+       changed), the obsolete principal is merged into the survivor — group
+       memberships are transferred and SpiceDB tuples replicated (status
+       ``merged``).  Otherwise creates a fresh principal (status ``bootstrapped``).
+    4. Dry-run mode reports ``would_merge`` or ``would_bootstrap`` accordingly.
+
+    .. note::
+       The ``not_found`` and ``inactive`` statuses were replaced by ``skipped``
+       (the ``detail`` field still distinguishes the reason).  Callers filtering
+       on the old values must update.
     """
     if request.method != "POST":
         return handle_error('Invalid method, only "POST" is allowed.', 405)
@@ -3393,7 +3403,7 @@ def bootstrap_users_from_user_ids(request):
     for user_id in user_ids:
         bop_user = bop_user_by_id.get(user_id)
         if bop_user is None:
-            results.append({"user_id": user_id, "status": "not_found", "detail": "User not found in BOP"})
+            results.append({"user_id": user_id, "status": "skipped", "detail": "User not found in BOP"})
             continue
 
         user = external_principal_to_user(bop_user)
@@ -3401,7 +3411,7 @@ def bootstrap_users_from_user_ids(request):
             results.append(
                 {
                     "user_id": user_id,
-                    "status": "inactive",
+                    "status": "skipped",
                     "detail": "User is not active in BOP",
                     "username": user.username,
                     "org_id": user.org_id,
@@ -3419,17 +3429,36 @@ def bootstrap_users_from_user_ids(request):
                 }
             )
             continue
+        tenant = Tenant.objects.filter(org_id=user.org_id).first()
+        obsolete_principal = None
+        if tenant is not None:
+            obsolete_principal = (
+                Principal.objects.filter(tenant=tenant, user_id=user_id).exclude(username=user.username).first()
+            )
+        needs_merging = obsolete_principal is not None
 
         if dry_run:
-            results.append(
-                {
-                    "user_id": user_id,
-                    "status": "would_bootstrap",
-                    "username": user.username,
-                    "org_id": user.org_id,
-                    "is_org_admin": user.admin,
-                }
-            )
+            if needs_merging:
+                results.append(
+                    {
+                        "user_id": user_id,
+                        "status": "would_merge",
+                        "detail": f"Would merge obsolete principal '{obsolete_principal.username}' into survivor",
+                        "username": user.username,
+                        "org_id": user.org_id,
+                        "is_org_admin": user.admin,
+                    }
+                )
+            else:
+                results.append(
+                    {
+                        "user_id": user_id,
+                        "status": "would_bootstrap",
+                        "username": user.username,
+                        "org_id": user.org_id,
+                        "is_org_admin": user.admin,
+                    }
+                )
             continue
 
         try:
@@ -3441,7 +3470,7 @@ def bootstrap_users_from_user_ids(request):
                 results.append(
                     {
                         "user_id": user_id,
-                        "status": "inactive",
+                        "status": "skipped",
                         "detail": "User became inactive during bootstrap",
                         "username": user.username,
                         "org_id": user.org_id,
@@ -3451,7 +3480,7 @@ def bootstrap_users_from_user_ids(request):
                 results.append(
                     {
                         "user_id": user_id,
-                        "status": "bootstrapped",
+                        "status": "merged" if needs_merging else "bootstrapped",
                         "username": user.username,
                         "org_id": user.org_id,
                         "tenant_ready": bootstrapped.tenant.ready,
@@ -3470,10 +3499,16 @@ def bootstrap_users_from_user_ids(request):
             )
 
     bootstrapped_count = sum(1 for r in results if r["status"] == "bootstrapped")
+    merged_count = sum(1 for r in results if r["status"] == "merged")
+    skipped_count = sum(1 for r in results if r["status"] == "skipped")
+    error_count = sum(1 for r in results if r["status"] == "error")
     logger.info(
-        "Bootstrap users from user_ids completed. total=%d bootstrapped=%d dry_run=%s",
+        "Bootstrap users from user_ids completed. total=%d bootstrapped=%d merged=%d skipped=%d error=%d dry_run=%s",
         len(user_ids),
         bootstrapped_count,
+        merged_count,
+        skipped_count,
+        error_count,
         dry_run,
     )
 
