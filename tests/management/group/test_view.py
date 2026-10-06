@@ -4461,7 +4461,7 @@ class GroupPrincipalViewsetTests(GroupViewsetTests):
         )
 
     @override_settings(ATOMIC_RETRY_DISABLED=True)
-    @patch("management.relation_replicator.outbox_replicator.OutboxReplicator._save_replication_event")
+    @patch("management.inventory_replicator.outbox_replicator.OutboxReplicator._save_replication_event")
     @patch(
         "management.principal.proxy.PrincipalProxy.request_filtered_principals",
         return_value={
@@ -4500,7 +4500,7 @@ class GroupPrincipalViewsetTests(GroupViewsetTests):
         self.assertEqual(response.data["errors"][0]["source"], "groups")
 
     @override_settings(ATOMIC_RETRY_DISABLED=True)
-    @patch("management.relation_replicator.outbox_replicator.OutboxReplicator._save_replication_event")
+    @patch("management.inventory_replicator.outbox_replicator.OutboxReplicator._save_replication_event")
     @patch(
         "management.principal.proxy.PrincipalProxy.request_filtered_principals",
         return_value={
@@ -4533,7 +4533,7 @@ class GroupPrincipalViewsetTests(GroupViewsetTests):
         )
 
     @override_settings(ATOMIC_RETRY_DISABLED=True)
-    @patch("management.relation_replicator.outbox_replicator.OutboxReplicator._save_replication_event")
+    @patch("management.inventory_replicator.outbox_replicator.OutboxReplicator._save_replication_event")
     @patch(
         "management.principal.proxy.PrincipalProxy.request_filtered_principals",
         return_value={
@@ -4583,7 +4583,7 @@ class GroupPrincipalViewsetTests(GroupViewsetTests):
         self.group.save()
 
     @override_settings(IT_BYPASS_TOKEN_VALIDATION=True, ATOMIC_RETRY_DISABLED=True)
-    @patch("management.relation_replicator.outbox_replicator.OutboxReplicator._save_replication_event")
+    @patch("management.inventory_replicator.outbox_replicator.OutboxReplicator._save_replication_event")
     @patch("management.principal.it_service.ITService.request_service_accounts")
     def test_add_service_account_precheck_blocks_protected_group_before_it_call(self, sa_mock, mock_repl):
         """Test that protected-group error surfaces before IT service-account validation."""
@@ -4608,7 +4608,7 @@ class GroupPrincipalViewsetTests(GroupViewsetTests):
         self.group.save()
 
     @override_settings(ATOMIC_RETRY_DISABLED=True, NOTIFICATIONS_ENABLED=True)
-    @patch("management.relation_replicator.outbox_replicator.OutboxReplicator._save_replication_event")
+    @patch("management.inventory_replicator.outbox_replicator.OutboxReplicator._save_replication_event")
     @patch(
         "management.principal.proxy.PrincipalProxy.request_filtered_principals",
         return_value={
@@ -4632,7 +4632,7 @@ class GroupPrincipalViewsetTests(GroupViewsetTests):
         self.assertTrue(mock_on_commit.called)
 
     @override_settings(ATOMIC_RETRY_DISABLED=True)
-    @patch("management.relation_replicator.outbox_replicator.OutboxReplicator._save_replication_event")
+    @patch("management.inventory_replicator.outbox_replicator.OutboxReplicator._save_replication_event")
     @patch(
         "management.principal.proxy.PrincipalProxy.request_filtered_principals",
         return_value={
@@ -4657,7 +4657,7 @@ class GroupPrincipalViewsetTests(GroupViewsetTests):
 
     @override_settings(PRINCIPAL_BACKFILL_AUTHORITATIVE_ENABLED=True)  # SERIALIZABLE only for authoritative backfill
     @patch("management.group.view.backfill_remote_principals")
-    @patch("management.relation_replicator.outbox_replicator.OutboxReplicator._save_replication_event")
+    @patch("management.inventory_replicator.outbox_replicator.OutboxReplicator._save_replication_event")
     @patch(
         "management.principal.proxy.PrincipalProxy.request_filtered_principals",
         return_value={

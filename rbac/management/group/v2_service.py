@@ -22,16 +22,16 @@ from typing import List, Optional, Sequence
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Exists, F, ProtectedError, Q, QuerySet
+from management.group.inventory_api_dual_write_group_handler import InventoryApiDualWriteGroupHandler
 from management.group.model import Group
-from management.group.relation_api_dual_write_group_handler import RelationApiDualWriteGroupHandler
 from management.group.v2_exceptions import (
     GroupAlreadyExistsError,
     GroupHasRoleBindingsError,
     PrincipalNotFoundError,
     ProtectedGroupError,
 )
+from management.inventory_replicator.inventory_replicator import ReplicationEventType
 from management.principal.model import Principal
-from management.relation_replicator.relation_replicator import ReplicationEventType
 from management.role.model import Role
 from management.v2_filters import v2_name_filter, v2_name_query
 
@@ -214,7 +214,7 @@ class GroupV2Service:
         # Construct before delete(): Django clears the instance pk on delete(), and while
         # this handler currently only reads group.tenant_id/uuid (unaffected), constructing
         # it up front matches the V1 destroy() ordering and avoids relying on that detail.
-        dual_write_handler = RelationApiDualWriteGroupHandler(group, ReplicationEventType.DELETE_GROUP)
+        dual_write_handler = InventoryApiDualWriteGroupHandler(group, ReplicationEventType.DELETE_GROUP)
         try:
             group.delete()
         except ProtectedError as e:
@@ -322,7 +322,7 @@ class GroupV2Service:
 
         if new_principals:
             group.principals.add(*new_principals)
-            dual_write_handler = RelationApiDualWriteGroupHandler(group, ReplicationEventType.ADD_PRINCIPALS_TO_GROUP)
+            dual_write_handler = InventoryApiDualWriteGroupHandler(group, ReplicationEventType.ADD_PRINCIPALS_TO_GROUP)
             dual_write_handler.replicate_new_principals(new_principals)
 
         return new_principals
@@ -334,7 +334,9 @@ class GroupV2Service:
         principals = self._resolve_member_principals(group, usernames, service_account_client_ids)
         group.principals.remove(*principals)
 
-        dual_write_handler = RelationApiDualWriteGroupHandler(group, ReplicationEventType.REMOVE_PRINCIPALS_FROM_GROUP)
+        dual_write_handler = InventoryApiDualWriteGroupHandler(
+            group, ReplicationEventType.REMOVE_PRINCIPALS_FROM_GROUP
+        )
         dual_write_handler.replicate_removed_principals(principals)
 
         return principals
@@ -354,7 +356,9 @@ class GroupV2Service:
 
         group.principals.remove(principal)
 
-        dual_write_handler = RelationApiDualWriteGroupHandler(group, ReplicationEventType.REMOVE_PRINCIPALS_FROM_GROUP)
+        dual_write_handler = InventoryApiDualWriteGroupHandler(
+            group, ReplicationEventType.REMOVE_PRINCIPALS_FROM_GROUP
+        )
         dual_write_handler.replicate_removed_principals([principal])
 
         return principal

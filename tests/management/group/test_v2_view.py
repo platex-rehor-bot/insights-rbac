@@ -36,13 +36,13 @@ from management.authorization.invalid_token import InvalidTokenError
 from management.authorization.missing_authorization import MissingAuthorizationError
 from management.authorization.unable_meet_prerequisites import UnableMeetPrerequisitesError
 from management.group.model import Group
-from management.group.relation_api_dual_write_group_handler import RelationApiDualWriteGroupHandler
+from management.group.inventory_api_dual_write_group_handler import InventoryApiDualWriteGroupHandler
 from management.group.v2_service import GroupV2Service
 from management.permissions.group_v2_access import GroupV2KesselAccessPermission
 from management.policy.model import Policy
 from management.principal.model import Principal
 from management.principal.unexpected_status_code_from_it import UnexpectedStatusCodeFromITError
-from management.relation_replicator.relation_replicator import ReplicationEventType
+from management.inventory_replicator.inventory_replicator import ReplicationEventType
 from management.role.model import Role
 from management.role.v2_model import CustomRoleV2
 from management.role_binding.model import RoleBinding, RoleBindingGroup
@@ -80,7 +80,9 @@ class GroupV2ViewTestBase(IdentityRequest):
             )
         )
         self.mock_check_access = self.enterContext(patch(ACCESS_CHECK_TARGET, return_value=True))
-        self.mock_dual_write = self.enterContext(patch("management.group.v2_service.RelationApiDualWriteGroupHandler"))
+        self.mock_dual_write = self.enterContext(
+            patch("management.group.v2_service.InventoryApiDualWriteGroupHandler")
+        )
 
         self.user_1 = Principal.objects.create(username="user_1", tenant=self.tenant)
         self.user_2 = Principal.objects.create(username="user_2", tenant=self.tenant)
@@ -1122,7 +1124,7 @@ class GroupV2DestroyViewTest(GroupV2ViewTestBase):
         self.assertEqual(log.action, AuditLog.DELETE)
         self.assertEqual(log.description, "Deleted V2 group: alpha")
 
-    @patch("management.relation_replicator.outbox_replicator.OutboxReplicator._save_replication_event")
+    @patch("management.inventory_replicator.outbox_replicator.OutboxReplicator._save_replication_event")
     def test_delete_group_replicates_member_removal(self, mock_save_event):
         """Deleting a group writes removal of its user member tuples to the outbox."""
         self.user_1.user_id = "1111"
@@ -1131,7 +1133,7 @@ class GroupV2DestroyViewTest(GroupV2ViewTestBase):
         self.user_2.save()
         group_uuid = str(self.group_a.uuid)
 
-        with patch("management.group.v2_service.RelationApiDualWriteGroupHandler", RelationApiDualWriteGroupHandler):
+        with patch("management.group.v2_service.InventoryApiDualWriteGroupHandler", InventoryApiDualWriteGroupHandler):
             response = self._delete(group_uuid)
 
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
