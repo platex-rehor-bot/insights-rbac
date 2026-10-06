@@ -5877,7 +5877,7 @@ class InternalBootstrapUsersFromUserIdsTests(BaseInternalViewsetTests):
         # dry_run must not mutate anything
         self.assertTrue(Principal.objects.filter(pk=obsolete.pk).exists())
 
-    @patch("management.relation_replicator.outbox_replicator.OutboxReplicator.replicate")
+    @patch("management.inventory_replicator.outbox_replicator.OutboxReplicator.replicate")
     @patch("management.principal.proxy.PrincipalProxy.request_filtered_principals")
     def test_bootstraps_new_user(self, request_filtered_principals, replicate):
         tuples = InMemoryTuples()
@@ -5895,7 +5895,7 @@ class InternalBootstrapUsersFromUserIdsTests(BaseInternalViewsetTests):
         principal = Principal.objects.get(tenant=self.tenant, user_id="111222")
         self.assertEqual(principal.username, "new.user@redhat.com")
 
-    @patch("management.relation_replicator.outbox_replicator.OutboxReplicator.replicate")
+    @patch("management.inventory_replicator.outbox_replicator.OutboxReplicator.replicate")
     @patch("management.principal.proxy.PrincipalProxy.request_filtered_principals")
     def test_merges_duplicate_principal_on_username_change(self, request_filtered_principals, replicate):
         """Merge when a BOP username change creates a stale principal.
