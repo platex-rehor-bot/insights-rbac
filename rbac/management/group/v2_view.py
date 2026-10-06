@@ -42,6 +42,7 @@ from management.group.v2_serializer import (
     GroupV2ResponseSerializer,
 )
 from management.group.v2_service import GroupV2Service
+from management.inventory_replicator.outbox_replicator import OutboxReplicator
 from management.notifications.notification_handlers import group_obj_change_notification_handler
 from management.permissions.group_v2_access import GroupV2KesselAccessPermission
 from management.permissions.v2_edit_api_access import V2WriteRequiresWorkspacesEnabled
@@ -51,7 +52,6 @@ from management.principal.model import Principal, SERVICE_ACCOUNT_USERNAME_FORMA
 from management.principal.proxy import PrincipalProxy, external_principal_to_user
 from management.principal.unexpected_status_code_from_it import UnexpectedStatusCodeFromITError
 from management.principal.v2_serializer import PrincipalV2OutputSerializer
-from management.relation_replicator.outbox_replicator import OutboxReplicator
 from management.tenant_service import get_tenant_bootstrap_service
 from management.utils import v2response_error_from_errors
 from management.v2_mixins import AtomicOperationsMixin
