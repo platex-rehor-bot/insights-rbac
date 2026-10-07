@@ -1921,12 +1921,12 @@
         },
         "unleashclient": {
             "hashes": [
-                "sha256:89319193bfffbbe2c6c4c4815aebb1755938e9b0f0cb3c080c00cd9918e9c630",
-                "sha256:a368ed333c462988d4110ef78ded09b81e7544a914cf63466657434206b09d95"
+                "sha256:b376d3ce9fe51e64be3b9c0194ea29ffbed0272d418f2fc2854371c5a6e32b8f",
+                "sha256:ec9c0f762ba432db94602079dd56fa674ae2e453c3fc441bd89e272e8af34e6b"
             ],
             "index": "pypi",
             "markers": "python_version >= '3.8'",
-            "version": "==6.8.0"
+            "version": "==6.9.0"
         },
         "urllib3": {
             "hashes": [
