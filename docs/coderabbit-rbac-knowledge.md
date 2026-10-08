@@ -43,13 +43,13 @@ References: [error-handling: Where to Raise What](error-handling-guidelines.md#w
 ## 4. Two-layer access control (v2)
 
 - Every v2 viewset declares an `*AccessPermission` class in `permission_classes` (endpoint-level 403).
-- Resources authorized per object (today: workspaces) also need a `*AccessFilterBackend`, listed first in `filter_backends`, so lists and detail lookups only see objects the caller can access.
+- Every v2 viewset also needs a `*AccessFilterBackend`, listed first in `filter_backends`, so lists and detail lookups only see objects the caller can access.
 - Detail views return 404, not 403, for objects the caller cannot access, so resource IDs cannot be probed.
 - When Kessel is unreachable, access checks default to deny.
 
-Flag: a new v2 viewset or action with no access permission class; a new per-object-authorized resource with no access filter backend; an access filter backend placed after other filters; a detail path (`retrieve`, `get_object`, or a `detail=True` action) that returns `403` or raises `PermissionDenied` for an object the caller cannot see, instead of 404 from the filtered queryset; an access check that returns `True` on a Kessel error.
+Flag: a new v2 viewset or action with no access permission class; a new v2 viewset or action with no access filter backend; an access filter backend placed after other filters; a detail path (`retrieve`, `get_object`, or a `detail=True` action) that returns `403` or raises `PermissionDenied` for an object the caller cannot see, instead of 404 from the filtered queryset; an access check that returns `True` on a Kessel error.
 
-Do not flag: endpoint-level 403 from the permission class (for example a non-admin calling a tenant-level write), which is correct; existing tenant-level viewsets (`RoleV2ViewSet`, `GroupV2ViewSet`, `RoleBindingViewSet`, `PrincipalV2ViewSet`, `AuditLogV2ViewSet`, `PermissionV2ViewSet`) that have a permission class and a tenant-scoped `get_queryset()` but no access filter backend.
+Do not flag: endpoint-level 403 from the permission class (for example a non-admin calling a tenant-level write), which is correct.
 
 References: [security: Two-layer v2 access control](security-guidelines.md#two-layer-v2-access-control), [security: Existence Leakage Prevention](security-guidelines.md#existence-leakage-prevention), [security: Kessel integration (v2)](security-guidelines.md#kessel-integration-v2)
 
@@ -101,7 +101,7 @@ There are four distinct trust boundaries, and each has its own entry point:
 3. ITSSO JWT bearer token, validated by `ITSSOTokenValidator`. The token's `user_id` must be in `SYSTEM_USERS`.
 4. Internal `/_private/` APIs, through `InternalIdentityHeaderMiddleware`. `/_private/_a2s/` is the exception and uses the public middleware.
 
-Flag: identity, `org_id` or admin status taken from user-controlled input; inline `user.system and user.admin` checks instead of `check_system_user_access()`; a new PSK client that should not be admin but keeps the default; logging of `SERVICE_PSKS`, `SYSTEM_USERS`, tokens or identity headers; changes to middleware order; a new `/_private/` route that skips internal auth.
+Flag: identity, `org_id` or admin status taken from user-controlled input without validation by the applicable authentication entry point (x-rh-identity, PSK, or JWT); inline `user.system and user.admin` checks instead of `check_system_user_access()`; a new PSK client that should not be admin but keeps the default; logging of `SERVICE_PSKS`, `SYSTEM_USERS`, tokens or identity headers; changes to middleware order; a new `/_private/` route that skips internal auth.
 
 References: [security: Authentication Layers](security-guidelines.md#authentication-layers), [security: System user access](security-guidelines.md#system-user-access), [security: Secrets and Configuration](security-guidelines.md#secrets-and-configuration)
 

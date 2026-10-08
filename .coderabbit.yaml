@@ -41,7 +41,7 @@ reviews:
     - path: "rbac/rbac/**"
       instructions: |
         Settings and authentication middleware. Flag:
-        - Identity, org_id or admin status taken from user input instead of the decoded x-rh-identity header
+        - Identity, org_id or admin status taken from user-controlled input without validation by the applicable authentication entry point (x-rh-identity, PSK, or JWT)
         - Changes to security middleware order, or dev-only bypasses (ALLOW_ANY, DEVELOPMENT,
           IT_BYPASS_TOKEN_VALIDATION, IT_BYPASS_IT_CALLS, DEBUG) defaulting to True
         - Logging of SERVICE_PSKS, SYSTEM_USERS, tokens or identity headers
