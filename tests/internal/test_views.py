@@ -19,6 +19,7 @@
 from abc import abstractmethod
 import logging
 
+from django.db import transaction
 from django.db.models import Count
 from rest_framework import status
 from rest_framework.test import APIClient
@@ -6298,6 +6299,12 @@ class VerifyMigrationSerializableAtomicTests(TransactionalIdentityRequest):
         self.default_workspace = bootstrap_result.default_workspace
         self.root_workspace = bootstrap_result.root_workspace
 
+        # Activate V2 writes so that dual-write handlers dispatch to the @atomic-decorated
+        # V2 methods (_add_car_roles_v2, _remove_car_roles_v2), exercising the nested
+        # @atomic-inside-atomic_block() code path this regression test targets.
+        with transaction.atomic():
+            ensure_v2_write_activated(self.tenant)
+
     def test_verify_migration_dry_run_serializable_atomic_regression(self):
         """Test that dry run works when @atomic uses its real (pgtransaction) implementation.
 
@@ -6315,9 +6322,13 @@ class VerifyMigrationSerializableAtomicTests(TransactionalIdentityRequest):
         real (unmocked) dual-write handlers on a V2 tenant.
         """
         Principal.objects.create(tenant=self.tenant, username="car-user", user_id="9876543")
+        Principal.objects.create(tenant=self.tenant, username="denied-car-user", user_id="1111111")
         custom_role = Role.objects.create(name="Custom Role", system=False, tenant=self.tenant)
         # CARs reference system roles (cross-account access grants system-role permissions).
         system_role = Role.objects.create(name="System Role for CAR", system=True, tenant=self.public_tenant)
+        denied_system_role = Role.objects.create(
+            name="System Role for Denied CAR", system=True, tenant=self.public_tenant
+        )
         approved_car = CrossAccountRequest.objects.create(
             target_org=self.tenant.org_id,
             user_id="9876543",
@@ -6325,13 +6336,16 @@ class VerifyMigrationSerializableAtomicTests(TransactionalIdentityRequest):
             end_date=timezone.now() + timedelta(days=30),
         )
         approved_car.roles.add(system_role)
+        # Use a distinct user_id and role so the removal section's active-role filter
+        # does not exclude this CAR's role, ensuring the removal atomic_block() path
+        # is actually exercised.
         denied_car = CrossAccountRequest.objects.create(
             target_org=self.tenant.org_id,
-            user_id="9876543",
+            user_id="1111111",
             status="denied",
             end_date=timezone.now() + timedelta(days=30),
         )
-        denied_car.roles.add(system_role)
+        denied_car.roles.add(denied_system_role)
 
         role_count_before = Role.objects.filter(tenant=self.tenant).count()
         car_count_before = CrossAccountRequest.objects.filter(target_org=self.tenant.org_id).count()
