@@ -5728,6 +5728,60 @@ class VerifyMigrationEndpointTests(BaseInternalViewsetTests):
         for mock_obj in self.mocks.values():
             mock_obj.assert_not_called()
 
+    def test_verify_migration_dry_run_serializable_atomic_regression(self):
+        """Test that dry run works when @atomic uses its real (pgtransaction) implementation.
+
+        Regression test: the verify code wraps dual-write handlers in the outermost
+        transaction, and those handlers' internal methods are decorated with @atomic
+        (pgtransaction.atomic SERIALIZABLE). When the outer transaction was a plain
+        transaction.atomic() that had already run queries, PostgreSQL rejected the
+        nested "SET TRANSACTION ISOLATION LEVEL" and every checked item in the roles
+        and cross_account_requests[_removed] sections failed with
+        "SET TRANSACTION ISOLATION LEVEL must be called before any query".
+
+        The test environment normally hides this because tox sets
+        ATOMIC_RETRY_UNSAFELY_DISABLED=True, which degrades @atomic to a plain
+        transaction.atomic(). This test forces the production atomic behavior with
+        real (unmocked) dual-write handlers on a V2 tenant.
+        """
+        Principal.objects.create(tenant=self.tenant, username="car-user", user_id="9876543")
+        custom_role = Role.objects.create(name="Custom Role", system=False, tenant=self.tenant)
+        approved_car = CrossAccountRequest.objects.create(
+            target_org=self.tenant.org_id,
+            user_id="9876543",
+            status="approved",
+            end_date=timezone.now() + timedelta(days=30),
+        )
+        approved_car.roles.add(custom_role)
+        denied_car = CrossAccountRequest.objects.create(
+            target_org=self.tenant.org_id,
+            user_id="9876543",
+            status="denied",
+            end_date=timezone.now() + timedelta(days=30),
+        )
+        denied_car.roles.add(custom_role)
+
+        with override_settings(ATOMIC_RETRY_DISABLED=False, REPLICATION_TO_RELATION_ENABLED=True):
+            response = self.client.get(
+                f"/_private/api/inventory/verify_migration/{self.tenant.org_id}/?dry_run=true",
+                **self.request.META,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        section_items = {
+            "roles": body["checks"]["roles"]["roles_checked"],
+            "cross_account_requests": body["checks"]["cross_account_requests"]["requests_checked"],
+            "cross_account_requests_removed": body["checks"]["cross_account_requests_removed"]["requests_checked"],
+        }
+        for section, items in section_items.items():
+            for item in items:
+                self.assertNotIn(
+                    "SET TRANSACTION ISOLATION LEVEL",
+                    item.get("error", ""),
+                    f"section {section} hit the isolation-level nesting bug: {item}",
+                )
+
     def test_verify_migration_checks_system_role_group_binding_mapping(self):
         """Test that a system role bound to a custom group via BindingMapping is verified.
 
